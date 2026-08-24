@@ -5,7 +5,7 @@ from prometheus_client import start_http_server
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from repo_agent.activities import run_inference
+from repo_agent.activities import call_mcp_tool, list_mcp_tools, run_inference
 from repo_agent.settings import get_settings
 from repo_agent.telemetry import configure_tracing
 from repo_agent.workflows import AgentWorkflow
@@ -24,7 +24,7 @@ async def serve() -> None:
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[AgentWorkflow],
-        activities=[run_inference],
+        activities=[run_inference, list_mcp_tools, call_mcp_tool],
     )
     await worker.run()
 

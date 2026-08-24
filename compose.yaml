@@ -115,6 +115,11 @@ services:
     restart: on-failure
     environment:
       <<: *app-environment
+      REPO_AGENT_GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      REPO_AGENT_GITHUB_MCP_URL: ${GITHUB_MCP_URL:-https://api.githubcopilot.com/mcp/}
+      REPO_AGENT_GITHUB_MCP_TOOLSETS: ${GITHUB_MCP_TOOLSETS:-repos,issues,pull_requests,users}
+      REPO_AGENT_MCP_ALLOW_WRITES: ${MCP_ALLOW_WRITES:-false}
+      REPO_AGENT_MCP_LOCKDOWN: ${MCP_LOCKDOWN:-true}
       REPO_AGENT_WORKER_METRICS_PORT: 9100
     ports:
       - "9100:9100"

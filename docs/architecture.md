@@ -1,8 +1,8 @@
 # Architecture
 
 `repo_agent` separates durable orchestration from side effects. Temporal owns workflow
-state and retry behavior, while a worker performs model inference through an
-OpenAI-compatible LiteLLM endpoint.
+state and retry behavior, while a worker performs model inference through LiteLLM and
+connects to GitHub's official remote MCP server through generic Activities.
 
 ## Components
 
@@ -11,7 +11,8 @@ OpenAI-compatible LiteLLM endpoint.
 | Web console | Submits tasks, polls workflow state, displays results, and keeps browser-local history |
 | FastAPI service | Validates requests, starts Temporal workflows, exposes results, and publishes API metrics |
 | Temporal | Persists workflow history, schedules Activities, and applies retry policies |
-| Worker | Registers workflow and Activity implementations with the `repo-agent` task queue |
+| Worker | Registers inference plus generic MCP discovery and invocation Activities |
+| GitHub MCP | Publishes typed GitHub tool schemas and executes authorized tool calls |
 | LiteLLM | Exposes the `agent-default` model through an OpenAI-compatible API |
 | Ollama | Runs the configured local model on the macOS host |
 | PostgreSQL | Stores Temporal server state |
@@ -25,11 +26,15 @@ OpenAI-compatible LiteLLM endpoint.
 1. A client sends a prompt to `POST /runs`.
 2. FastAPI assigns a unique `repo-agent-<uuid>` workflow ID.
 3. Temporal starts `AgentWorkflow` on the `repo-agent` task queue.
-4. The workflow constructs a system/user message pair and schedules `run_inference`.
-5. The worker calls LiteLLM using model alias `agent-default`.
-6. LiteLLM resolves the configured Ollama model and calls the host Ollama service.
-7. The Activity returns text and model metadata to the workflow.
-8. Temporal persists the result; clients retrieve it from `/runs/{workflow_id}/result`.
+4. The workflow schedules `list_mcp_tools`; the worker negotiates with GitHub MCP and
+	returns its current tool schemas.
+5. The workflow converts those schemas to OpenAI-compatible function definitions and
+	schedules `run_inference`.
+6. The model selects a tool; Temporal schedules the generic `call_mcp_tool` Activity.
+7. The worker invokes the named tool through MCP Streamable HTTP and returns its typed
+	result to workflow history.
+8. The workflow sends the result back to the model and repeats for up to 12 iterations.
+9. Temporal persists the final response for `/runs/{workflow_id}/result`.
 
 The inference Activity has a ten-minute start-to-close timeout and retries up to four
 times with exponential intervals bounded at one minute.
@@ -54,9 +59,14 @@ mutates state should accept an idempotency key and make repeated execution safe.
 
 ## Current Scope
 
-The current agent is an orchestration and inference foundation. The prompt is sent to the
-model, but repository contents are not automatically included. The containers also do not
-mount the repository as a worker-controlled tool workspace.
+The agent can use any tool exposed by configured GitHub MCP toolsets. The default toolsets
+cover repositories, issues, pull requests, and users. Changing `GITHUB_MCP_TOOLSETS`
+expands or narrows capabilities without Python changes.
+
+GitHub MCP runs read-only unless the worker has `MCP_ALLOW_WRITES=true` and the individual
+run has `allow_writes=true`. Write-enabled tool calls have one Temporal attempt to avoid
+automatically repeating a mutation after an ambiguous timeout. Lockdown mode is enabled by
+default to reduce prompt-injection exposure from untrusted public GitHub content.
 
 A repository-capable implementation should add narrow Activities rather than broad shell
 access. Useful first capabilities include:

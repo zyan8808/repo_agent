@@ -132,6 +132,17 @@
       border-top: 1px solid var(--line);
     }
     .hint { color: var(--muted); font-size: 12px; }
+    .write-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      text-transform: none;
+    }
+    .write-toggle input { accent-color: var(--green); }
     .run-button {
       min-width: 124px;
       min-height: 42px;
@@ -214,7 +225,10 @@
           <label for="prompt">Agent task</label>
           <textarea id="prompt" maxlength="100000" required placeholder="Review the architecture and identify the highest-risk area..."></textarea>
           <div class="composer-footer">
-            <span class="hint">Runs locally through Temporal and Ollama</span>
+            <label class="write-toggle" for="allow-writes">
+              <input id="allow-writes" type="checkbox">
+              Allow GitHub writes
+            </label>
             <button class="run-button" id="run-button" type="submit">Run agent</button>
           </div>
         </form>
@@ -238,6 +252,7 @@
   <script>
     const form = document.querySelector("#run-form");
     const promptInput = document.querySelector("#prompt");
+    const allowWritesInput = document.querySelector("#allow-writes");
     const runButton = document.querySelector("#run-button");
     const resultPanel = document.querySelector("#result");
     const statusView = document.querySelector("#status");
@@ -325,6 +340,8 @@
       event.preventDefault();
       const prompt = promptInput.value.trim();
       if (!prompt) return;
+      const allowWrites = allowWritesInput.checked;
+      if (allowWrites && !window.confirm("Allow this run to make changes on GitHub?")) return;
 
       runButton.disabled = true;
       runButton.textContent = "Running...";
@@ -337,7 +354,7 @@
         const accepted = await requestJson("/runs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, allow_writes: allowWrites }),
         });
         outputView.textContent = `Workflow ${accepted.workflow_id} is running...`;
         const completed = await pollRun(accepted.workflow_id);

@@ -39,6 +39,7 @@ WORKFLOWS_STARTED = Counter(
 
 class RunCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=100_000)
+    allow_writes: bool = False
 
 
 class RunAccepted(BaseModel):
@@ -116,7 +117,7 @@ async def create_run(body: RunCreate, request: Request) -> RunAccepted:
     workflow_id = f"repo-agent-{uuid4()}"
     await temporal_client(request).start_workflow(
         AgentWorkflow.run,
-        AgentRequest(prompt=body.prompt),
+        AgentRequest(prompt=body.prompt, allow_writes=body.allow_writes),
         id=workflow_id,
         task_queue=settings.temporal_task_queue,
     )

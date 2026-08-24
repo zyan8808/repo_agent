@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:4000/v1"
     llm_api_key: str = "local-development"
     llm_model: str = "agent-default"
+    github_mcp_url: str = "https://api.githubcopilot.com/mcp/"
+    github_mcp_toolsets: str = "repos,issues,pull_requests,users"
+    github_token: str | None = None
+    mcp_allow_writes: bool = False
+    mcp_lockdown: bool = True
+    mcp_timeout_seconds: int = 120
+    mcp_max_result_chars: int = 100_000
     otlp_endpoint: str = "http://localhost:4317"
     worker_metrics_port: int = 9100
     log_level: str = "INFO"

@@ -4,10 +4,10 @@
 FastAPI web/API surface, Temporal orchestration, a LiteLLM model gateway, Ollama local
 inference, and a complete local observability stack.
 
-The current workflow accepts a text task, runs model inference as a retryable Temporal
-Activity, and stores the durable result. It does not yet read, edit, or execute against
-repository files automatically; those capabilities can be added as explicit Activities
-with appropriate safety and idempotency controls.
+The workflow accepts a text task, discovers tools from GitHub's official MCP server, runs
+each external call as a Temporal Activity, and stores the durable result. MCP provides a
+standard capability layer for repository contents, commits, issues, pull requests, users,
+and additional GitHub toolsets without requiring a new Activity for each operation.
 
 ## What It Provides
 
@@ -15,6 +15,8 @@ with appropriate safety and idempotency controls.
 - Durable workflow execution with retries and persisted state
 - Local model inference through Ollama, routed by LiteLLM
 - Workflow status and result APIs
+- Extensible GitHub tools through the official remote GitHub MCP server
+- Read-only operation by default with explicit worker-level and per-run write gates
 - Prometheus metrics, OpenTelemetry traces, and a provisioned Grafana dashboard
 - Containerized local infrastructure with persistent service data
 
@@ -26,6 +28,8 @@ flowchart LR
 	 API --> Temporal[Temporal]
 	 Temporal --> Worker[Agent worker]
 	 Worker --> LiteLLM[LiteLLM]
+	 Worker --> GitHubMCP[GitHub MCP]
+	 GitHubMCP --> GitHub[GitHub]
 	 LiteLLM --> Ollama[Ollama on host]
 	 API -. traces .-> OTel[OpenTelemetry Collector]
 	 Worker -. traces .-> OTel
@@ -60,10 +64,11 @@ through `LOCAL_MODEL` when the host cannot run it comfortably.
 	ollama pull qwen3.8:27b
 	```
 
-2. Create the local environment file and start the stack:
+2. Create the local environment file, add a fine-grained GitHub token, and start the stack:
 
 	```bash
 	cp .env.example .env
+	# Edit GITHUB_TOKEN in .env
 	docker compose up --build -d
 	```
 
@@ -74,6 +79,16 @@ through `LOCAL_MODEL` when the host cannot run it comfortably.
 Enter a task and select **Run agent**. The console displays workflow state, model output,
 and browser-local history. Temporal persists workflow state independently of that browser
 history.
+
+Try a repository activity question:
+
+```text
+Which repo has the most commits in the past 12 months under user zyan8808?
+```
+
+The non-interactive worker authenticates to `https://api.githubcopilot.com/mcp/` with
+`GITHUB_TOKEN`. The token is passed only to the worker and is never included in model
+messages or Temporal workflow inputs. Grant only the GitHub permissions the agent needs.
 
 ## Use the API
 
@@ -133,7 +148,7 @@ The main code is organized as follows:
 src/repo_agent/
   api.py          HTTP API, web console, and API metrics
   workflows.py    deterministic Temporal workflow definitions
-  activities.py   model inference and side effects
+  activities.py   model inference and generic MCP client Activities
   worker.py       Temporal worker process
   telemetry.py    OpenTelemetry trace configuration
   settings.py     environment-backed application settings
@@ -146,7 +161,8 @@ tests/            automated tests
 
 - Keep Temporal workflow code deterministic.
 - Put model calls, file access, Git operations, and other side effects in Activities.
-- Give mutating Activities idempotency keys before enabling retries.
+- Do not automatically retry mutating MCP tool calls.
+- Require both worker configuration and per-run authorization for GitHub writes.
 - Validate repository paths and command inputs before adding repository execution tools.
 - Keep secrets in `.env` or a secret manager; `.env` is intentionally ignored by Git.
 
