@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>repo_agent console</title>
+  <style>
+    :root {
+      --ink: #17211b;
+      --muted: #667168;
+      --paper: #f4f0e8;
+      --panel: #fffdf8;
+      --line: #d8d2c6;
+      --green: #1f6b45;
+      --green-dark: #12472d;
+      --amber: #d98a26;
+      --red: #a63d2f;
+      --shadow: 0 18px 45px rgba(38, 49, 40, 0.09);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(31, 107, 69, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(31, 107, 69, 0.045) 1px, transparent 1px),
+        var(--paper);
+      background-size: 32px 32px;
+      font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button, textarea { font: inherit; }
+
+    .shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 24px 0 56px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 4px 0 22px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      color: white;
+      background: var(--green);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 800;
+    }
+    .brand strong { display: block; font-size: 17px; }
+    .brand span { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
+
+    nav { display: flex; gap: 6px; }
+    nav a {
+      color: var(--muted);
+      padding: 8px 10px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    nav a:hover { color: var(--green); }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 24px;
+      padding-top: 34px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(30px, 5vw, 48px);
+      font-weight: 500;
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+    .intro { margin: 0 0 26px; color: var(--muted); line-height: 1.6; }
+
+    .composer, .result, .history {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .composer { padding: 18px; }
+    label {
+      display: block;
+      margin-bottom: 10px;
+      color: var(--green-dark);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    textarea {
+      display: block;
+      width: 100%;
+      min-height: 150px;
+      resize: vertical;
+      border: 0;
+      outline: 0;
+      color: var(--ink);
+      background: transparent;
+      font-size: 17px;
+      line-height: 1.55;
+    }
+    textarea::placeholder { color: #a19f98; }
+
+    .composer-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .hint { color: var(--muted); font-size: 12px; }
+    .run-button {
+      min-width: 124px;
+      min-height: 42px;
+      border: 0;
+      border-radius: 6px;
+      color: white;
+      background: var(--green);
+      cursor: pointer;
+      font-weight: 750;
+    }
+    .run-button:hover { background: var(--green-dark); }
+    .run-button:disabled { cursor: wait; opacity: 0.62; }
+
+    .result { display: none; margin-top: 20px; overflow: hidden; }
+    .result.visible { display: block; animation: rise 220ms ease-out; }
+    @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+    .result-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .status { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 750; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
+    .status.complete .dot { background: var(--green); }
+    .status.error .dot { background: var(--red); }
+    .model { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .output {
+      margin: 0;
+      padding: 20px;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .history { align-self: start; box-shadow: none; overflow: hidden; }
+    .history-title { padding: 16px; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 800; }
+    .history-list { margin: 0; padding: 0; list-style: none; }
+    .history-empty { padding: 28px 16px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .history-item { width: 100%; padding: 14px 16px; border: 0; border-bottom: 1px solid var(--line); text-align: left; background: transparent; cursor: pointer; }
+    .history-item:hover { background: #f7f6f0; }
+    .history-prompt { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13px; font-weight: 650; }
+    .history-meta { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
+
+    @media (max-width: 760px) {
+      .shell { width: min(100% - 22px, 620px); padding-top: 14px; }
+      header { align-items: flex-start; }
+      nav { display: grid; grid-template-columns: repeat(2, auto); }
+      main { grid-template-columns: 1fr; padding-top: 26px; }
+      .history { order: 2; }
+      .composer-footer { align-items: flex-end; }
+      .hint { max-width: 170px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="brand">
+        <div class="mark" aria-hidden="true">rA</div>
+        <div><strong>repo_agent</strong><span>local workflow console</span></div>
+      </div>
+      <nav aria-label="Service links">
+        <a href="/docs">API</a>
+        <a href="http://localhost:8080">Temporal</a>
+        <a href="http://localhost:3000/d/repo-agent-overview/repo-agent-overview">Grafana</a>
+        <a href="http://localhost:9090/query?g0.expr=repo_agent_inference_calls_total&g0.tab=graph">Metrics</a>
+      </nav>
+    </header>
+
+    <main>
+      <section>
+        <h1>Put the agent to work.</h1>
+        <p class="intro">Submit a repository task, follow its durable workflow, and inspect the local model response.</p>
+
+        <form class="composer" id="run-form">
+          <label for="prompt">Agent task</label>
+          <textarea id="prompt" maxlength="100000" required placeholder="Review the architecture and identify the highest-risk area..."></textarea>
+          <div class="composer-footer">
+            <span class="hint">Runs locally through Temporal and Ollama</span>
+            <button class="run-button" id="run-button" type="submit">Run agent</button>
+          </div>
+        </form>
+
+        <section class="result" id="result" aria-live="polite">
+          <div class="result-head">
+            <div class="status" id="status"><span class="dot"></span><span id="status-text">Starting</span></div>
+            <span class="model" id="model"></span>
+          </div>
+          <pre class="output" id="output">Creating a durable workflow...</pre>
+        </section>
+      </section>
+
+      <aside class="history" aria-label="Recent runs">
+        <div class="history-title">Recent runs</div>
+        <div id="history"></div>
+      </aside>
+    </main>
+  </div>
+
+  <script>
+    const form = document.querySelector("#run-form");
+    const promptInput = document.querySelector("#prompt");
+    const runButton = document.querySelector("#run-button");
+    const resultPanel = document.querySelector("#result");
+    const statusView = document.querySelector("#status");
+    const statusText = document.querySelector("#status-text");
+    const modelView = document.querySelector("#model");
+    const outputView = document.querySelector("#output");
+    const historyView = document.querySelector("#history");
+    const storageKey = "repo-agent-runs";
+
+    const loadHistory = () => {
+      try { return JSON.parse(localStorage.getItem(storageKey) || "[]"); }
+      catch { return []; }
+    };
+
+    const saveRun = (run) => {
+      const runs = [run, ...loadHistory().filter((item) => item.id !== run.id)].slice(0, 8);
+      localStorage.setItem(storageKey, JSON.stringify(runs));
+      renderHistory();
+    };
+
+    const renderHistory = () => {
+      const runs = loadHistory();
+      historyView.replaceChildren();
+      if (!runs.length) {
+        const empty = document.createElement("div");
+        empty.className = "history-empty";
+        empty.textContent = "Completed workflows will appear here on this browser.";
+        historyView.append(empty);
+        return;
+      }
+      const list = document.createElement("ul");
+      list.className = "history-list";
+      runs.forEach((run) => {
+        const item = document.createElement("li");
+        const button = document.createElement("button");
+        const task = document.createElement("span");
+        const meta = document.createElement("span");
+        button.type = "button";
+        button.className = "history-item";
+        task.className = "history-prompt";
+        meta.className = "history-meta";
+        task.textContent = run.prompt;
+        meta.textContent = `${run.model || "agent-default"} · ${new Date(run.createdAt).toLocaleString()}`;
+        button.append(task, meta);
+        button.addEventListener("click", () => showResult(run));
+        item.append(button);
+        list.append(item);
+      });
+      historyView.append(list);
+    };
+
+    const setStatus = (label, kind = "") => {
+      statusView.className = `status ${kind}`;
+      statusText.textContent = label;
+    };
+
+    const showResult = (run) => {
+      resultPanel.classList.add("visible");
+      setStatus(run.error ? "Failed" : "Completed", run.error ? "error" : "complete");
+      modelView.textContent = run.model || "";
+      outputView.textContent = run.error || run.output;
+    };
+
+    const requestJson = async (url, options) => {
+      const response = await fetch(url, options);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail || `Request failed (${response.status})`);
+      return body;
+    };
+
+    const pollRun = async (workflowId) => {
+      while (true) {
+        const run = await requestJson(`/runs/${workflowId}`);
+        const state = run.status.replaceAll("_", " ");
+        setStatus(state.charAt(0).toUpperCase() + state.slice(1));
+        if (run.status === "completed") return requestJson(`/runs/${workflowId}/result`);
+        if (["failed", "canceled", "terminated", "timed_out"].includes(run.status)) {
+          return requestJson(`/runs/${workflowId}/result`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    };
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const prompt = promptInput.value.trim();
+      if (!prompt) return;
+
+      runButton.disabled = true;
+      runButton.textContent = "Running...";
+      resultPanel.classList.add("visible");
+      setStatus("Starting");
+      modelView.textContent = "";
+      outputView.textContent = "Creating a durable workflow...";
+
+      try {
+        const accepted = await requestJson("/runs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt }),
+        });
+        outputView.textContent = `Workflow ${accepted.workflow_id} is running...`;
+        const completed = await pollRun(accepted.workflow_id);
+        const run = {
+          id: accepted.workflow_id,
+          prompt,
+          output: completed.output,
+          model: completed.model,
+          createdAt: Date.now(),
+        };
+        showResult(run);
+        saveRun(run);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "The run failed.";
+        setStatus("Failed", "error");
+        outputView.textContent = message;
+      } finally {
+        runButton.disabled = false;
+        runButton.textContent = "Run agent";
+      }
+    });
+
+    promptInput.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") form.requestSubmit();
+    });
+
+    renderHistory();
+  </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 model_list:
   - model_name: agent-default
     litellm_params:
-      model: ollama_chat/os.environ/LOCAL_MODEL
+      model: os.environ/LITELLM_MODEL
       api_base: http://host.docker.internal:11434
 
 general_settings:

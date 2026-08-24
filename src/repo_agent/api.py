@@ -1,13 +1,18 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
+from time import perf_counter
 from typing import cast
 from uuid import uuid4
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import FileResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from prometheus_client import make_asgi_app
+from prometheus_client import Counter, Histogram, make_asgi_app
 from pydantic import BaseModel, Field
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 from starlette.types import ASGIApp
 from temporalio.client import Client, WorkflowFailureError
 
@@ -15,6 +20,21 @@ from repo_agent.contracts import AgentRequest, AgentResult
 from repo_agent.settings import get_settings
 from repo_agent.telemetry import configure_tracing
 from repo_agent.workflows import AgentWorkflow
+
+HTTP_REQUESTS = Counter(
+    "repo_agent_http_requests_total",
+    "HTTP requests handled by the agent API",
+    ["method", "route", "status"],
+)
+HTTP_REQUEST_DURATION = Histogram(
+    "repo_agent_http_request_duration_seconds",
+    "HTTP request duration for the agent API",
+    ["method", "route"],
+)
+WORKFLOWS_STARTED = Counter(
+    "repo_agent_workflows_started_total",
+    "Agent workflows accepted by the API",
+)
 
 
 class RunCreate(BaseModel):
@@ -52,8 +72,37 @@ app.mount("/metrics", cast(ASGIApp, make_asgi_app()))
 FastAPIInstrumentor.instrument_app(app)
 
 
+@app.middleware("http")
+async def record_http_metrics(
+    request: Request,
+    call_next: RequestResponseEndpoint,
+) -> Response:
+    started_at = perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", "unmatched")
+        HTTP_REQUESTS.labels(
+            method=request.method,
+            route=route_path,
+            status=str(status_code),
+        ).inc()
+        HTTP_REQUEST_DURATION.labels(method=request.method, route=route_path).observe(
+            perf_counter() - started_at
+        )
+
+
 def temporal_client(request: Request) -> Client:
     return cast(Client, request.app.state.temporal)
+
+
+@app.get("/", include_in_schema=False, response_class=FileResponse)
+async def console() -> FileResponse:
+    return FileResponse(Path(__file__).parent / "static" / "index.html")
 
 
 @app.get("/health")
@@ -71,6 +120,7 @@ async def create_run(body: RunCreate, request: Request) -> RunAccepted:
         id=workflow_id,
         task_queue=settings.temporal_task_queue,
     )
+    WORKFLOWS_STARTED.inc()
     return RunAccepted(workflow_id=workflow_id)
 
 
@@ -83,9 +133,12 @@ async def get_run(workflow_id: str, request: Request) -> RunStatus:
 
 @app.get("/runs/{workflow_id}/result", response_model=RunOutput)
 async def get_run_result(workflow_id: str, request: Request) -> RunOutput:
-    handle = temporal_client(request).get_workflow_handle(workflow_id)
+    handle = temporal_client(request).get_workflow_handle(
+        workflow_id,
+        result_type=AgentResult,
+    )
     try:
-        result = cast(AgentResult, await handle.result())
+        result = await handle.result()
     except WorkflowFailureError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return RunOutput(

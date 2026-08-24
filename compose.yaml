@@ -40,7 +40,7 @@ services:
     command: ["litellm", "--config", "/app/config.yaml", "--port", "4000"]
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-local-development}
-      LOCAL_MODEL: ${LOCAL_MODEL:-qwen3.8:27b}
+      LITELLM_MODEL: ollama_chat/${LOCAL_MODEL:-qwen3.8:27b}
     volumes:
       - ./configs/litellm.yaml:/app/config.yaml:ro
     ports:
@@ -84,6 +84,8 @@ services:
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
     volumes:
       - ./configs/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ./configs/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ./configs/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
       - "3000:3000"
