@@ -5,6 +5,7 @@ from time import perf_counter
 from typing import cast
 from uuid import uuid4
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse
@@ -40,6 +41,7 @@ WORKFLOWS_STARTED = Counter(
 class RunCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=100_000)
     allow_writes: bool = False
+    model: str = Field(default="agent-default", min_length=1, max_length=200)
 
 
 class RunAccepted(BaseModel):
@@ -55,6 +57,18 @@ class RunOutput(BaseModel):
     workflow_id: str
     output: str
     model: str
+
+
+class ModelOption(BaseModel):
+    id: str
+
+
+class ModelCatalog(BaseModel):
+    models: list[ModelOption]
+
+
+class LiteLLMModelList(BaseModel):
+    data: list[ModelOption]
 
 
 @asynccontextmanager
@@ -101,6 +115,16 @@ def temporal_client(request: Request) -> Client:
     return cast(Client, request.app.state.temporal)
 
 
+async def available_models() -> list[str]:
+    settings = get_settings()
+    headers = {"Authorization": f"Bearer {settings.llm_api_key}"}
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(f"{settings.llm_base_url.rstrip('/')}/models", headers=headers)
+        response.raise_for_status()
+    model_ids = {model.id for model in LiteLLMModelList.model_validate_json(response.content).data}
+    return sorted(model_ids, key=lambda model_id: (model_id != "agent-default", model_id))
+
+
 @app.get("/", include_in_schema=False, response_class=FileResponse)
 async def console() -> FileResponse:
     return FileResponse(Path(__file__).parent / "static" / "index.html")
@@ -111,13 +135,32 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/models", response_model=ModelCatalog)
+async def get_models() -> ModelCatalog:
+    try:
+        models = await available_models()
+    except (httpx.HTTPError, ValueError) as error:
+        raise HTTPException(status_code=503, detail="Model catalog is unavailable") from error
+    return ModelCatalog(models=[ModelOption(id=model_id) for model_id in models])
+
+
 @app.post("/runs", response_model=RunAccepted, status_code=status.HTTP_202_ACCEPTED)
 async def create_run(body: RunCreate, request: Request) -> RunAccepted:
     settings = get_settings()
+    try:
+        models = await available_models()
+    except (httpx.HTTPError, ValueError) as error:
+        raise HTTPException(status_code=503, detail="Model catalog is unavailable") from error
+    if body.model not in models:
+        raise HTTPException(status_code=400, detail=f"Unknown model: {body.model}")
     workflow_id = f"repo-agent-{uuid4()}"
     await temporal_client(request).start_workflow(
         AgentWorkflow.run,
-        AgentRequest(prompt=body.prompt, allow_writes=body.allow_writes),
+        AgentRequest(
+            prompt=body.prompt,
+            allow_writes=body.allow_writes,
+            model=body.model,
+        ),
         id=workflow_id,
         task_queue=settings.temporal_task_queue,
     )

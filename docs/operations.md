@@ -8,7 +8,7 @@ API behavior, and common operational failures.
 - Docker Desktop with the Docker daemon running
 - Docker Compose v2 (`docker compose`)
 - Ollama installed and running on the host
-- The model named by `LOCAL_MODEL` downloaded in Ollama
+- The `LOCAL_MODEL` tag and any additional local model aliases downloaded in Ollama
 - `uv` for running tests and development tools on the host
 
 Verify the main prerequisites:
@@ -30,18 +30,21 @@ ignores it.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `LOCAL_MODEL` | `qwen3.8:27b` | Ollama model routed through the `agent-default` alias |
-| `LITELLM_MASTER_KEY` | `local-development` | LiteLLM gateway key used by the worker |
-| `REPO_AGENT_LLM_API_KEY` | `local-development` | API key sent from the worker to LiteLLM |
+| `LITELLM_MASTER_KEY` | `local-development` | Authentication key enforced by the LiteLLM gateway |
+| `REPO_AGENT_LLM_API_KEY` | `local-development` | API key sent from the API and worker to LiteLLM |
+| `ANTHROPIC_API_KEY` | empty | Anthropic credential used only by LiteLLM |
+| `ANTHROPIC_MODEL` | `anthropic/claude-sonnet-4-5-20250929` | Model routed through `agent-anthropic` |
+| `OPENAI_API_KEY` | empty | OpenAI credential used only by LiteLLM |
+| `OPENAI_MODEL` | `openai/gpt-5-mini` | Model routed through `agent-openai` |
 | `GITHUB_TOKEN` | empty | Required PAT for the non-interactive GitHub MCP client |
 | `GITHUB_MCP_URL` | `https://api.githubcopilot.com/mcp/` | Remote MCP endpoint |
 | `GITHUB_MCP_TOOLSETS` | `repos,issues,pull_requests,users` | GitHub MCP capability groups |
 | `MCP_ALLOW_WRITES` | `false` | Administrative gate for mutating GitHub tools |
 | `MCP_LOCKDOWN` | `true` | Filter untrusted public GitHub content where supported |
-| `OPENAI_API_KEY` | empty | Reserved for optional hosted LiteLLM routes |
-| `ANTHROPIC_API_KEY` | empty | Reserved for optional hosted LiteLLM routes |
-| `GEMINI_API_KEY` | empty | Reserved for optional hosted LiteLLM routes |
+| `GEMINI_API_KEY` | empty | Reserved for additional hosted LiteLLM routes |
 
-Optional hosted-provider keys are not used by the checked-in LiteLLM model route.
+Provider API keys are passed only to the LiteLLM container. They are not available to the
+API or worker containers.
 
 ### Application Settings
 
@@ -54,7 +57,6 @@ Application settings use the `REPO_AGENT_` prefix.
 | `REPO_AGENT_TEMPORAL_TASK_QUEUE` | `repo-agent` | `repo-agent` |
 | `REPO_AGENT_LLM_BASE_URL` | `http://localhost:4000/v1` | `http://litellm:4000/v1` |
 | `REPO_AGENT_LLM_API_KEY` | `local-development` | From `.env` |
-| `REPO_AGENT_LLM_MODEL` | `agent-default` | `agent-default` |
 | `REPO_AGENT_GITHUB_MCP_URL` | `https://api.githubcopilot.com/mcp/` | Same |
 | `REPO_AGENT_GITHUB_MCP_TOOLSETS` | `repos,issues,pull_requests,users` | From `.env` |
 | `REPO_AGENT_GITHUB_TOKEN` | unset | From `GITHUB_TOKEN` in `.env` |
@@ -110,14 +112,40 @@ docker compose down -v
 | --- | --- |
 | `GET /` | Web console |
 | `GET /health` | API liveness response |
-| `POST /runs` | Start from `{ "prompt": "...", "allow_writes": false }` |
+| `GET /models` | Return model aliases currently advertised by LiteLLM |
+| `POST /runs` | Start from `{ "prompt": "...", "model": "agent-default", "allow_writes": false }` |
 | `GET /runs/{workflow_id}` | Return normalized workflow status |
 | `GET /runs/{workflow_id}/result` | Wait for and return the typed workflow result |
 | `GET /metrics/` | Prometheus exposition endpoint |
 | `GET /docs` | Interactive OpenAPI documentation |
 
-Prompts must contain between 1 and 100,000 characters. Successful submissions return
-HTTP `202`. A failed workflow result returns HTTP `409`.
+Prompts must contain between 1 and 100,000 characters. The model defaults to
+`agent-default` and must match the live `/models` catalog. Successful submissions return
+HTTP `202`. An unknown model returns HTTP `400`; a failed workflow result returns HTTP
+`409`.
+
+## Model Selection
+
+LiteLLM currently advertises these aliases:
+
+| Alias | Provider target |
+| --- | --- |
+| `agent-default` | Ollama model selected by `LOCAL_MODEL` |
+| `agent-qwen3-8b` | Ollama `qwen3:8b` |
+| `agent-anthropic` | Anthropic model selected by `ANTHROPIC_MODEL` |
+| `agent-openai` | OpenAI model selected by `OPENAI_MODEL` |
+
+The web console loads this list from `GET /models`, so aliases added to
+`configs/litellm.yaml` appear without a UI code change. The chosen alias is stored in the
+Temporal workflow input and used for every inference step in that run. Routing is manual
+per run; the checked-in LiteLLM configuration does not automatically load-balance or fall
+back between providers.
+
+After changing model settings or provider credentials, recreate LiteLLM:
+
+```bash
+docker compose up -d --force-recreate litellm
+```
 
 ## GitHub MCP
 
@@ -162,7 +190,28 @@ Pull a missing model, then recreate LiteLLM:
 
 ```bash
 ollama pull qwen3.8:27b
+ollama pull qwen3:8b
 docker compose up -d --force-recreate litellm
+```
+
+### Anthropic Requests Fail
+
+Confirm `ANTHROPIC_API_KEY` is set in `.env` and `ANTHROPIC_MODEL` names a model available
+to that account. Recreate LiteLLM after changing either value, then inspect only its logs:
+
+```bash
+docker compose up -d --force-recreate litellm
+docker compose logs --tail=100 litellm
+```
+
+### OpenAI Requests Fail
+
+Confirm `OPENAI_API_KEY` is set in `.env` and `OPENAI_MODEL` names a model available to
+that OpenAI project. Recreate LiteLLM after changing either value, then inspect its logs:
+
+```bash
+docker compose up -d --force-recreate litellm
+docker compose logs --tail=100 litellm
 ```
 
 ### A Workflow Stays Running

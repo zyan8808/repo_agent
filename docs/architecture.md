@@ -8,13 +8,15 @@ connects to GitHub's official remote MCP server through generic Activities.
 
 | Component | Responsibility |
 | --- | --- |
-| Web console | Submits tasks, polls workflow state, displays results, and keeps browser-local history |
-| FastAPI service | Validates requests, starts Temporal workflows, exposes results, and publishes API metrics |
+| Web console | Loads the model catalog, submits tasks, polls workflow state, displays results, and keeps browser-local history |
+| FastAPI service | Proxies the LiteLLM model catalog, validates requests, starts Temporal workflows, exposes results, and publishes API metrics |
 | Temporal | Persists workflow history, schedules Activities, and applies retry policies |
 | Worker | Registers inference plus generic MCP discovery and invocation Activities |
 | GitHub MCP | Publishes typed GitHub tool schemas and executes authorized tool calls |
-| LiteLLM | Exposes the `agent-default` model through an OpenAI-compatible API |
-| Ollama | Runs the configured local model on the macOS host |
+| LiteLLM | Exposes configured Ollama, Anthropic, and OpenAI aliases through an OpenAI-compatible API |
+| Ollama | Runs the configured local models on the macOS host |
+| Anthropic | Provides optional hosted inference when the Anthropic alias is selected |
+| OpenAI | Provides optional hosted inference when the OpenAI alias is selected |
 | PostgreSQL | Stores Temporal server state |
 | OpenTelemetry Collector | Receives OTLP traces and exports them to Tempo |
 | Prometheus | Scrapes application and collector metrics |
@@ -23,21 +25,27 @@ connects to GitHub's official remote MCP server through generic Activities.
 
 ## Request Flow
 
-1. A client sends a prompt to `POST /runs`.
-2. FastAPI assigns a unique `repo-agent-<uuid>` workflow ID.
-3. Temporal starts `AgentWorkflow` on the `repo-agent` task queue.
-4. The workflow schedules `list_mcp_tools`; the worker negotiates with GitHub MCP and
+1. The console loads available aliases from `GET /models`, backed by LiteLLM's catalog.
+2. A client sends a prompt and selected model alias to `POST /runs`.
+3. FastAPI validates the alias and assigns a unique `repo-agent-<uuid>` workflow ID.
+4. Temporal starts `AgentWorkflow` on the `repo-agent` task queue.
+5. The workflow schedules `list_mcp_tools`; the worker negotiates with GitHub MCP and
 	returns its current tool schemas.
-5. The workflow converts those schemas to OpenAI-compatible function definitions and
+6. The workflow converts those schemas to OpenAI-compatible function definitions and
 	schedules `run_inference`.
-6. The model selects a tool; Temporal schedules the generic `call_mcp_tool` Activity.
-7. The worker invokes the named tool through MCP Streamable HTTP and returns its typed
+7. The selected model invokes a tool; Temporal schedules the generic `call_mcp_tool` Activity.
+8. The worker invokes the named tool through MCP Streamable HTTP and returns its typed
 	result to workflow history.
-8. The workflow sends the result back to the model and repeats for up to 12 iterations.
-9. Temporal persists the final response for `/runs/{workflow_id}/result`.
+9. The workflow sends the result back to the same model alias and repeats for up to 12
+	iterations.
+10. Temporal persists the final response for `/runs/{workflow_id}/result`.
 
 The inference Activity has a ten-minute start-to-close timeout and retries up to four
 times with exponential intervals bounded at one minute.
+
+The model alias is part of the durable workflow input. A run therefore keeps the same
+selection across Activity retries and workflow replay. LiteLLM resolves that alias to its
+provider target; no automatic cross-provider fallback is configured.
 
 ## Durability Boundary
 

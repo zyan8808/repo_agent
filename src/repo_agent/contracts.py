@@ -6,6 +6,7 @@ from typing import Any
 class AgentRequest:
     prompt: str
     allow_writes: bool = False
+    model: str = "agent-default"
 
 
 @dataclass(frozen=True)

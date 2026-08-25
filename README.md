@@ -13,7 +13,7 @@ and additional GitHub toolsets without requiring a new Activity for each operati
 
 - A browser console for submitting tasks and reviewing recent results
 - Durable workflow execution with retries and persisted state
-- Local model inference through Ollama, routed by LiteLLM
+- Selectable local Ollama, hosted Anthropic, and hosted OpenAI inference through LiteLLM
 - Workflow status and result APIs
 - Extensible GitHub tools through the official remote GitHub MCP server
 - Read-only operation by default with explicit worker-level and per-run write gates
@@ -31,6 +31,8 @@ flowchart LR
 	 Worker --> GitHubMCP[GitHub MCP]
 	 GitHubMCP --> GitHub[GitHub]
 	 LiteLLM --> Ollama[Ollama on host]
+	 LiteLLM --> Anthropic[Anthropic API]
+	 LiteLLM --> OpenAI[OpenAI API]
 	 API -. traces .-> OTel[OpenTelemetry Collector]
 	 Worker -. traces .-> OTel
 	 API -. metrics .-> Prometheus
@@ -62,6 +64,7 @@ through `LOCAL_MODEL` when the host cannot run it comfortably.
 	brew install ollama
 	brew services start ollama
 	ollama pull qwen3.8:27b
+	ollama pull qwen3:8b
 	```
 
 2. Create the local environment file, add a fine-grained GitHub token, and start the stack:
@@ -76,9 +79,15 @@ through `LOCAL_MODEL` when the host cannot run it comfortably.
 
 	**http://localhost:8000/**
 
-Enter a task and select **Run agent**. The console displays workflow state, model output,
-and browser-local history. Temporal persists workflow state independently of that browser
-history.
+Enter a task, choose a model, and select **Run agent**. The model menu is populated from
+LiteLLM's live catalog. The console displays workflow state, model output, and browser-local
+history. Temporal persists workflow state independently of that browser history.
+
+The checked-in aliases are `agent-default` for the `LOCAL_MODEL` Ollama tag,
+`agent-qwen3-8b` for local `qwen3:8b`, `agent-anthropic` for `ANTHROPIC_MODEL`, and
+`agent-openai` for `OPENAI_MODEL`. Set the corresponding provider API key in `.env`
+before using a hosted option. Selection is manual per run; automatic cross-provider
+fallback is not enabled.
 
 Try a repository activity question:
 
@@ -92,13 +101,19 @@ messages or Temporal workflow inputs. Grant only the GitHub permissions the agen
 
 ## Use the API
 
-Start a workflow:
+List the model aliases currently advertised by LiteLLM:
+
+```bash
+curl --fail --silent http://localhost:8000/models | jq .
+```
+
+Start a workflow with a selected alias:
 
 ```bash
 response=$(curl --fail --silent --show-error \
   -X POST http://localhost:8000/runs \
   -H 'Content-Type: application/json' \
-  -d '{"prompt":"Explain the architecture of this agent service"}')
+	-d '{"prompt":"Explain the architecture of this agent service","model":"agent-qwen3-8b"}')
 
 workflow_id=$(printf '%s' "$response" | jq -r '.workflow_id')
 printf '%s\n' "$workflow_id"

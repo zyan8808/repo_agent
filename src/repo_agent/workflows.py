@@ -75,7 +75,7 @@ class AgentWorkflow:
                 "run_inference",
                 InferenceRequest(
                     messages=messages,
-                    model="agent-default",
+                    model=request.model,
                     tools=[openai_tool(tool) for tool in mcp_tools.tools] or None,
                 ),
                 start_to_close_timeout=timedelta(minutes=10),

@@ -6,6 +6,7 @@ def test_agent_contracts_round_trip() -> None:
     result = AgentResult(output="Done", model="agent-default")
 
     assert request.prompt == "Inspect this repository"
+    assert request.model == "agent-default"
     assert result.output == "Done"
 
     tool_request = McpToolCallRequest(

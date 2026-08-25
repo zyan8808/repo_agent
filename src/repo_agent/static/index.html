@@ -34,7 +34,7 @@
       letter-spacing: 0;
     }
 
-    button, textarea { font: inherit; }
+    button, select, textarea { font: inherit; }
 
     .shell {
       width: min(1180px, calc(100% - 32px));
@@ -131,6 +131,20 @@
       padding-top: 14px;
       border-top: 1px solid var(--line);
     }
+    .run-options { display: flex; align-items: center; gap: 18px; }
+    .model-picker { display: flex; align-items: center; gap: 8px; }
+    .model-picker label { margin: 0; }
+    select {
+      max-width: 220px;
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      color: var(--ink);
+      background: var(--panel);
+      padding: 4px 28px 4px 8px;
+      font-size: 12px;
+    }
+    select:disabled { color: var(--muted); }
     .hint { color: var(--muted); font-size: 12px; }
     .write-toggle {
       display: flex;
@@ -197,7 +211,8 @@
       main { grid-template-columns: 1fr; padding-top: 26px; }
       .history { order: 2; }
       .composer-footer { align-items: flex-end; }
-      .hint { max-width: 170px; }
+      .run-options { align-items: flex-start; flex-direction: column; gap: 10px; }
+      select { max-width: 180px; }
     }
   </style>
 </head>
@@ -219,16 +234,24 @@
     <main>
       <section>
         <h1>Put the agent to work.</h1>
-        <p class="intro">Submit a repository task, follow its durable workflow, and inspect the local model response.</p>
+        <p class="intro">Submit a repository task, follow its durable workflow, and inspect the selected model response.</p>
 
         <form class="composer" id="run-form">
           <label for="prompt">Agent task</label>
           <textarea id="prompt" maxlength="100000" required placeholder="Review the architecture and identify the highest-risk area..."></textarea>
           <div class="composer-footer">
-            <label class="write-toggle" for="allow-writes">
-              <input id="allow-writes" type="checkbox">
-              Allow GitHub writes
-            </label>
+            <div class="run-options">
+              <div class="model-picker">
+                <label for="model-select">Model</label>
+                <select id="model-select" disabled>
+                  <option>Loading models...</option>
+                </select>
+              </div>
+              <label class="write-toggle" for="allow-writes">
+                <input id="allow-writes" type="checkbox">
+                Allow GitHub writes
+              </label>
+            </div>
             <button class="run-button" id="run-button" type="submit">Run agent</button>
           </div>
         </form>
@@ -253,6 +276,7 @@
     const form = document.querySelector("#run-form");
     const promptInput = document.querySelector("#prompt");
     const allowWritesInput = document.querySelector("#allow-writes");
+    const modelSelect = document.querySelector("#model-select");
     const runButton = document.querySelector("#run-button");
     const resultPanel = document.querySelector("#result");
     const statusView = document.querySelector("#status");
@@ -323,6 +347,26 @@
       return body;
     };
 
+    const loadModels = async () => {
+      try {
+        const catalog = await requestJson("/models");
+        modelSelect.replaceChildren();
+        catalog.models.forEach((model) => {
+          const option = document.createElement("option");
+          option.value = model.id;
+          option.textContent = model.id;
+          modelSelect.append(option);
+        });
+        modelSelect.disabled = catalog.models.length === 0;
+        runButton.disabled = catalog.models.length === 0;
+      } catch (error) {
+        const option = document.createElement("option");
+        option.textContent = "Models unavailable";
+        modelSelect.replaceChildren(option);
+        runButton.disabled = true;
+      }
+    };
+
     const pollRun = async (workflowId) => {
       while (true) {
         const run = await requestJson(`/runs/${workflowId}`);
@@ -340,6 +384,7 @@
       event.preventDefault();
       const prompt = promptInput.value.trim();
       if (!prompt) return;
+      const model = modelSelect.value;
       const allowWrites = allowWritesInput.checked;
       if (allowWrites && !window.confirm("Allow this run to make changes on GitHub?")) return;
 
@@ -347,14 +392,14 @@
       runButton.textContent = "Running...";
       resultPanel.classList.add("visible");
       setStatus("Starting");
-      modelView.textContent = "";
+      modelView.textContent = model;
       outputView.textContent = "Creating a durable workflow...";
 
       try {
         const accepted = await requestJson("/runs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, allow_writes: allowWrites }),
+          body: JSON.stringify({ prompt, allow_writes: allowWrites, model }),
         });
         outputView.textContent = `Workflow ${accepted.workflow_id} is running...`;
         const completed = await pollRun(accepted.workflow_id);
@@ -382,6 +427,7 @@
     });
 
     renderHistory();
+    loadModels();
   </script>
 </body>
 </html>

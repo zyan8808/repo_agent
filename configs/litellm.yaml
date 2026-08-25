@@ -3,6 +3,18 @@ model_list:
     litellm_params:
       model: os.environ/LITELLM_MODEL
       api_base: http://host.docker.internal:11434
+  - model_name: agent-qwen3-8b
+    litellm_params:
+      model: ollama_chat/qwen3:8b
+      api_base: http://host.docker.internal:11434
+  - model_name: agent-anthropic
+    litellm_params:
+      model: os.environ/ANTHROPIC_MODEL
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: agent-openai
+    litellm_params:
+      model: os.environ/OPENAI_MODEL
+      api_key: os.environ/OPENAI_API_KEY
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
