@@ -1,24 +1,22 @@
 # Metrics and Observability
 
 The local observability stack combines Prometheus metrics, OpenTelemetry traces, Grafana
-visualization, and Tempo trace storage.
+visualization, and Tempo trace storage. This guide describes telemetry semantics and
+operations; the end-to-end system flow is documented in [Architecture](architecture.md).
 
-## Data Flow
+## Telemetry Surfaces
 
-```mermaid
-flowchart LR
-    API[FastAPI API] -- /metrics/ --> Prometheus
-    Worker[Temporal worker] -- :9100/metrics --> Prometheus
-    API -- OTLP traces --> Collector[OpenTelemetry Collector]
-    Worker -- OTLP traces --> Collector
-    Collector -- OTLP traces --> Tempo
-    Collector -- :9464 metrics --> Prometheus
-    Prometheus --> Grafana
-    Tempo --> Grafana
-```
+| Signal | Producer | Transport and collection | Storage and query |
+| --- | --- | --- | --- |
+| API metrics | FastAPI middleware and Python Prometheus client | Prometheus scrapes `/metrics/` every 15 seconds | Prometheus and Grafana |
+| Inference metrics | Temporal worker Activities and Python Prometheus client | Prometheus scrapes `:9100/metrics` every 15 seconds | Prometheus and Grafana |
+| Runtime metrics | Python Prometheus client process collectors | Same API and worker scrape targets | Prometheus and Grafana |
+| API request traces | OpenTelemetry FastAPI instrumentation | OTLP/gRPC to the collector, then batched OTLP to Tempo | Tempo and Grafana Explore |
+| Collector metrics | OpenTelemetry Collector Prometheus exporter | Prometheus scrapes `:9464/metrics` | Prometheus and Grafana |
 
-Prometheus scrapes every 15 seconds. Application metrics are exposed directly by the API
-and worker; traces travel through the OpenTelemetry Collector to Tempo.
+The worker configures an OTLP trace provider, but the current application does not create
+worker Activity spans or install a Temporal tracing interceptor. The configured exporter
+is therefore plumbing for future instrumentation, not evidence of end-to-end traces.
 
 ## Endpoints
 
@@ -59,6 +57,10 @@ mounted ASGI application or redirects may appear as `unmatched`.
 Activity retries produce a metric event for each attempt. An eventual workflow success may
 therefore coexist with earlier inference errors.
 
+Neither worker metric includes workflow ID, repository, tool name, or provider account.
+That keeps cardinality bounded and avoids leaking user input, but it also means Prometheus
+cannot reconstruct one run. Use Temporal history for workflow-level diagnosis.
+
 ### Runtime Metrics
 
 The Python Prometheus client also publishes process and interpreter metrics, including:
@@ -70,6 +72,23 @@ The Python Prometheus client also publishes process and interpreter metrics, inc
 - `python_gc_objects_collected_total`
 
 Use the Prometheus `job` label to distinguish `repo-agent-api` and `repo-agent-worker`.
+
+## What the Metrics Answer
+
+| Design question | Current signal | Interpretation |
+| --- | --- | --- |
+| Is the service reachable? | `up` by scrape job | Distinguishes API, worker, and collector target health |
+| Is API demand changing? | HTTP request rate by templated route | Shows client polling and submission load without workflow-ID cardinality |
+| Is the API slowing down? | HTTP duration histogram | Includes route handling time; the result route may wait for workflow completion |
+| Are runs being accepted? | Workflows-started counter | Counts accepted submissions, not successful completions |
+| Is inference healthy? | Inference attempts by `model` and `status` | Counts Activity attempts, so retries increase both traffic and errors |
+| Is inference slow? | Inference duration histogram by model alias | Measures worker wait time around the LiteLLM request |
+| Is a process resource constrained? | CPU, memory, file descriptor, and GC metrics | Indicates process pressure but not Ollama GPU or model memory usage |
+
+The result endpoint's latency is intentionally different from ordinary API latency: it
+waits on `handle.result()`, so its histogram can approximate client-observed workflow wait
+time for clients that call it immediately. It is not a durable workflow-duration metric,
+because clients can call it late, disconnect, or never call it.
 
 ## Grafana Dashboard
 
@@ -155,13 +174,65 @@ Resident memory by application process:
 process_resident_memory_bytes{job=~"repo-agent-api|repo-agent-worker"}
 ```
 
+Five-minute API error ratio:
+
+```promql
+sum(rate(repo_agent_http_requests_total{status=~"5.."}[5m]))
+/
+clamp_min(sum(rate(repo_agent_http_requests_total[5m])), 1e-9)
+```
+
+Inference error ratio by selected alias:
+
+```promql
+sum by (model) (rate(repo_agent_inference_calls_total{status="error"}[15m]))
+/
+clamp_min(sum by (model) (rate(repo_agent_inference_calls_total[15m])), 1e-9)
+```
+
+Suggested local alert candidates are sustained scrape failure, API 5xx ratio, inference
+error ratio, p95 inference latency, resident-memory growth, and file-descriptor pressure.
+Thresholds are workload- and model-dependent; establish a baseline before assigning an
+SLO or paging policy.
+
 ## Traces
 
-FastAPI and the worker configure OTLP trace exporters with service names
-`repo-agent-api` and `repo-agent-worker`. The collector exports those traces to Tempo.
+FastAPI instrumentation creates server spans with service name `repo-agent-api`. The API
+and worker both configure OTLP trace exporters, and the collector exports received spans
+to Tempo. The current worker has no explicit Activity spans, OpenAI/httpx client
+instrumentation, or Temporal OpenTelemetry interceptor, so a normal trace ends at the API
+boundary rather than following a run through Temporal, LiteLLM, and GitHub MCP.
 
 Use Grafana **Explore**, select the Tempo data source, and filter by service name. Trace
 retention is local and follows the lifecycle of the `tempo-data` Docker volume.
+
+To produce a true end-to-end trace, add Temporal client/worker propagation and Activity
+spans around model discovery, inference, MCP discovery, and MCP invocation. Span attributes
+should use bounded values such as model alias, Activity name, attempt, and status. Do not
+attach prompts, tool results, credentials, workflow IDs as metric labels, or arbitrary
+repository names without a retention and privacy policy.
+
+OpenTelemetry uses a batch span processor. Batching lowers request overhead but can lose
+recent spans on abrupt process termination. The current code also uses the default sampler,
+which is appropriate for local volume but needs an explicit sampling and retention policy
+before higher-throughput deployment.
+
+## Coverage Gaps
+
+The current telemetry intentionally remains small. A production-oriented iteration should
+add the following in priority order:
+
+1. Workflow completion, failure, cancellation, and durable end-to-end duration metrics.
+2. Temporal schedule-to-start latency and task-queue backlog for worker capacity planning.
+3. MCP discovery/call counts, latency, tool category, truncation, and error status.
+4. LiteLLM/provider token counts, rate-limit responses, estimated cost, and time to first
+  token where the provider exposes them.
+5. Ollama host CPU, accelerator, memory, queue depth, and model-load duration.
+6. PostgreSQL, Temporal Server, Prometheus, Tempo, and container-level health metrics.
+
+Keep labels bounded. Model aliases, operation classes, and status codes are suitable;
+prompts, workflow IDs, commit SHAs, repository names, and exception messages are usually
+high-cardinality or sensitive and belong in traces or structured logs instead.
 
 ## Populate the Dashboard
 
@@ -198,3 +269,7 @@ done
 
 If Grafana has no dashboard at all, recreate it so file provisioning runs. Do not delete
 `grafana-data` unless losing local Grafana state is acceptable.
+
+If metrics exist but traces do not, first trigger an API request and search Tempo for
+`service.name = repo-agent-api`. Do not expect `repo-agent-worker` Activity spans until
+worker instrumentation is implemented.

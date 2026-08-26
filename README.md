@@ -2,7 +2,7 @@
 
 `repo_agent` is a local-first foundation for durable AI agent workflows. It combines a
 FastAPI web/API surface, Temporal orchestration, a LiteLLM model gateway, Ollama local
-inference, and a complete local observability stack.
+inference, and a local metrics and tracing stack.
 
 The workflow accepts a text task, discovers tools from GitHub's official MCP server, runs
 each external call as a Temporal Activity, and stores the durable result. MCP provides a
@@ -23,27 +23,90 @@ and additional GitHub toolsets without requiring a new Activity for each operati
 ## Architecture
 
 ```mermaid
-flowchart LR
-	 Browser[Web console] --> API[FastAPI]
-	 API --> Temporal[Temporal]
-	 Temporal --> Worker[Agent worker]
-	 Worker --> LiteLLM[LiteLLM]
-	 Worker --> GitHubMCP[GitHub MCP]
-	 GitHubMCP --> GitHub[GitHub]
-	 LiteLLM --> Ollama[Ollama on host]
-	 LiteLLM --> Anthropic[Anthropic API]
-	 LiteLLM --> OpenAI[OpenAI API]
-	 API -. traces .-> OTel[OpenTelemetry Collector]
-	 Worker -. traces .-> OTel
-	 API -. metrics .-> Prometheus
-	 Worker -. metrics .-> Prometheus
-	 OTel --> Tempo
-	 Prometheus --> Grafana
-	 Tempo --> Grafana
+flowchart TB
+	subgraph edge["Client and API gateway"]
+		Client["Client<br/>Browser console, REST, or curl"]
+		API["API gateway<br/>FastAPI 0.116+ and Uvicorn<br/>Pydantic validation, OpenAPI, HTTP metrics"]
+		Client -->|"GET /models<br/>POST /runs<br/>GET status and result"| API
+	end
+
+	subgraph backend["Durable backend inference system"]
+		Temporal["Workflow engine<br/>Temporal Server 1.28.1<br/>durable history, timers, retries"]
+		Worker["Agent worker<br/>Python 3.12 and Temporal SDK 1.15+<br/>repo-agent task queue"]
+		Loop["AgentWorkflow<br/>discover tools, infer, invoke tools<br/>maximum 12 inference iterations"]
+		Infer["run_inference Activity<br/>OpenAI SDK 2.20+<br/>10 minute timeout, up to 4 attempts"]
+		MCP["MCP Activities<br/>MCP SDK 1.29+ and httpx<br/>Streamable HTTP, 3/5 minute timeouts"]
+
+		Temporal <-->|"workflow and Activity tasks"| Worker
+		Worker --> Loop
+		Loop --> Infer
+		Loop --> MCP
+	end
+
+	subgraph models["Model catalog and selection"]
+		LiteLLM["Model gateway<br/>LiteLLM 1.75+ proxy<br/>OpenAI-compatible API, aliases, provider credentials"]
+		Ollama["Local inference<br/>Ollama on macOS<br/>qwen3.8:27b or qwen3:8b"]
+		Anthropic["Hosted inference<br/>Anthropic API"]
+		OpenAI["Hosted inference<br/>OpenAI API"]
+
+		LiteLLM -->|"agent-default or agent-qwen3-8b"| Ollama
+		LiteLLM -->|"agent-anthropic"| Anthropic
+		LiteLLM -->|"agent-openai"| OpenAI
+	end
+
+	subgraph tools["Repository capability plane"]
+		GitHubMCP["GitHub MCP server<br/>tool discovery and typed invocation<br/>token auth, readonly and lockdown headers"]
+		GitHub["GitHub APIs and repositories"]
+		GitHubMCP --> GitHub
+	end
+
+	subgraph data["Persistence"]
+		Postgres["PostgreSQL 16<br/>Temporal workflow and Activity history<br/>postgres-data volume"]
+	end
+
+	subgraph observe["Tracing and metrics"]
+		Collector["OpenTelemetry Collector 0.136<br/>OTLP gRPC and HTTP receivers, batch processor"]
+		Prometheus["Prometheus 3.6<br/>15 second scrapes<br/>API, worker, and collector metrics"]
+		Tempo["Tempo 2.8<br/>local trace storage<br/>tempo-data volume"]
+		Grafana["Grafana 12.1<br/>provisioned dashboard and trace Explore"]
+
+		Collector -->|"OTLP traces"| Tempo
+		Prometheus --> Grafana
+		Tempo --> Grafana
+	end
+
+	API -->|"start, describe, await result"| Temporal
+	API -->|"live model catalog, 10 second timeout"| LiteLLM
+	Infer -->|"selected alias is fixed for the run"| LiteLLM
+	MCP -->|"tools and results, 100,000 character cap"| GitHubMCP
+	Temporal -->|"durable state"| Postgres
+	API -.->|"FastAPI request spans via OTLP"| Collector
+	Worker -.->|"OTLP provider configured; Activity spans are a gap"| Collector
+	API -.->|"/metrics"| Prometheus
+	Worker -.->|":9100/metrics"| Prometheus
+	Collector -.->|":9464/metrics"| Prometheus
 ```
 
 See [Architecture](docs/architecture.md) for component responsibilities, request flow,
-durability boundaries, and extension guidance.
+durability boundaries, design tradeoffs, failure modes, and scaling guidance. See
+[Metrics and observability](docs/metrics.md) for metric definitions, PromQL, dashboards,
+and the current trace-coverage boundary.
+
+### Design at a Glance
+
+| Decision | Benefit | Tradeoff |
+| --- | --- | --- |
+| Temporal orchestration | Runs survive worker and API restarts with durable retry state | Additional infrastructure and deterministic workflow constraints |
+| LiteLLM aliases | One model API across local and hosted providers | Extra network hop and a central routing dependency |
+| Model fixed per run | Predictable privacy, cost, and replay behavior | No automatic provider failover |
+| Runtime MCP discovery | Tool schemas can evolve without Python Activity changes | Discovery latency and schemas are recorded per workflow |
+| Two write gates | Requires both operator and per-run intent | Ambiguous remote writes still require idempotency or reconciliation |
+| Prometheus plus Tempo | Metrics and traces stay inspectable in the local stack | Local volumes are neither highly available nor long-term storage |
+
+The current design optimizes for understandable local operation and durable execution, not
+public multi-tenancy or high availability. The main production gaps are API authentication,
+worker/Activity tracing, mutation idempotency, provider-aware concurrency, and backed-up
+state stores.
 
 ## Prerequisites
 

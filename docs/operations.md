@@ -1,7 +1,9 @@
 # Operations and Configuration
 
 This guide covers local prerequisites, environment settings, service lifecycle commands,
-API behavior, and common operational failures.
+API behavior, dependency management, capacity signals, and common operational failures.
+The checked-in Compose topology is a single-host development deployment, not a
+high-availability production configuration.
 
 ## Local Prerequisites
 
@@ -62,9 +64,32 @@ Application settings use the `REPO_AGENT_` prefix.
 | `REPO_AGENT_GITHUB_TOKEN` | unset | From `GITHUB_TOKEN` in `.env` |
 | `REPO_AGENT_MCP_ALLOW_WRITES` | `false` | From `MCP_ALLOW_WRITES` in `.env` |
 | `REPO_AGENT_MCP_LOCKDOWN` | `true` | From `MCP_LOCKDOWN` in `.env` |
+| `REPO_AGENT_MCP_TIMEOUT_SECONDS` | `120` | `120` |
+| `REPO_AGENT_MCP_MAX_RESULT_CHARS` | `100000` | `100000` |
 | `REPO_AGENT_OTLP_ENDPOINT` | `http://localhost:4317` | `http://otel-collector:4317` |
 | `REPO_AGENT_WORKER_METRICS_PORT` | `9100` | `9100` |
 | `REPO_AGENT_LOG_LEVEL` | `INFO` | `INFO` |
+
+The MCP HTTP/read timeout is distinct from Temporal's Activity start-to-close timeout.
+The workflow allows three minutes for discovery and five minutes for a tool call, while
+each individual MCP HTTP session uses the 120-second application default. Increasing only
+one layer may leave the other as the effective limit.
+
+## Runtime Dependencies
+
+| Service | Hard dependency | Behavior when unavailable |
+| --- | --- | --- |
+| API | Temporal at startup | Startup fails until a Temporal connection can be established |
+| API model routes | LiteLLM | `GET /models` and new `POST /runs` requests return `503` |
+| Temporal | PostgreSQL | Durable workflow progress stops when history cannot be persisted |
+| Worker | Temporal at startup | No workflow or Activity tasks are polled |
+| Inference Activity | LiteLLM and selected provider | Temporal retries up to four attempts, then fails the workflow |
+| MCP discovery/calls | GitHub MCP and token | Discovery returns no tools when the token is absent; remote failures are retried |
+| Grafana | Prometheus and Tempo | UI starts, but affected panels or trace queries are empty |
+
+Compose health-gates Temporal on PostgreSQL. The API and worker use `restart: on-failure`,
+which is convenient locally but is not readiness orchestration: repeated failures still
+require inspecting container state and logs.
 
 ## Service Lifecycle
 
@@ -139,7 +164,8 @@ The web console loads this list from `GET /models`, so aliases added to
 `configs/litellm.yaml` appear without a UI code change. The chosen alias is stored in the
 Temporal workflow input and used for every inference step in that run. Routing is manual
 per run; the checked-in LiteLLM configuration does not automatically load-balance or fall
-back between providers.
+back between providers. If the selected target is unavailable, Temporal retries the same
+alias; it never moves the run to a provider with a different privacy or cost boundary.
 
 After changing model settings or provider credentials, recreate LiteLLM:
 
@@ -174,6 +200,59 @@ curl --fail http://localhost:3000/api/health
 curl --fail http://localhost:9090/-/ready
 curl --fail http://localhost:11434/api/version
 ```
+
+These probes answer different questions. `/health` confirms that the API process can serve
+a request, but does not prove that LiteLLM, Temporal, the worker, GitHub MCP, or a model is
+ready. Use a model-catalog request plus a small workflow as an end-to-end readiness test:
+
+```bash
+curl --fail http://localhost:8000/models
+curl --fail --silent --show-error \
+	-X POST http://localhost:8000/runs \
+	-H 'Content-Type: application/json' \
+	-d '{"prompt":"Reply with ready and do not use tools","model":"agent-default"}'
+```
+
+## Capacity and Scaling
+
+The local stack has one API process, one worker process, one LiteLLM gateway, and one
+PostgreSQL instance. Before adding replicas, identify the constrained layer:
+
+| Signal | Likely constraint | First response |
+| --- | --- | --- |
+| API latency rises while inference is stable | API process or client polling volume | Add API replicas or reduce polling frequency |
+| Temporal schedule-to-start time rises | Worker capacity | Add workers on the same task queue; add queue metrics first |
+| Inference latency rises for local aliases | Ollama compute, memory, or model queue | Use a smaller model or constrain model concurrency |
+| Hosted inference returns rate limits | Provider quota or excessive worker concurrency | Apply provider-specific concurrency and backoff |
+| MCP calls dominate duration | GitHub latency, pagination, or broad results | Narrow toolsets and requests; add MCP latency metrics |
+| Temporal persistence slows | PostgreSQL resources or history growth | Tune or scale PostgreSQL and review workflow-history size |
+
+More workers can increase throughput only while LiteLLM, Ollama, hosted-provider quotas,
+GitHub MCP, and PostgreSQL have spare capacity. Unbounded worker scaling can amplify rate
+limits and cost. Separate task queues are the next step when inference and repository
+Activities need different concurrency limits or worker hardware.
+
+## Deployment and Security Posture
+
+The Compose file binds published ports to loopback, keeps provider keys in LiteLLM, keeps
+the GitHub token in the worker, and defaults GitHub MCP to read-only lockdown mode. Those
+are useful local boundaries, but opening the host or placing the stack behind a public
+load balancer changes the threat model.
+
+Before a shared or public deployment, add:
+
+1. TLS plus authentication and per-user authorization at the API gateway.
+2. Request rate limits, prompt/body limits at the edge, and workflow quotas.
+3. A secret manager and credential rotation instead of Compose environment injection.
+4. Grafana authentication; anonymous Admin access is local-development only.
+5. Managed or backed-up PostgreSQL and explicit Prometheus/Tempo retention policies.
+6. Network policies that restrict direct access to Temporal, LiteLLM, telemetry ports, and
+	 database services.
+7. Structured audit logs and provider-supported idempotency for mutating GitHub calls.
+8. End-to-end Temporal/Activity tracing and alerts for queue, provider, and MCP failures.
+
+For the reasoning behind these boundaries, see [Architecture](architecture.md). For the
+signals used to operate them, see [Metrics and observability](metrics.md).
 
 ## Troubleshooting
 
