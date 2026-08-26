@@ -81,7 +81,7 @@ flowchart TB
 	MCP -->|"tools and results, 100,000 character cap"| GitHubMCP
 	Temporal -->|"durable state"| Postgres
 	API -.->|"FastAPI request spans via OTLP"| Collector
-	Worker -.->|"OTLP provider configured; Activity spans are a gap"| Collector
+	Worker -.->|"Temporal workflow, Activity, LLM, and MCP spans"| Collector
 	API -.->|"/metrics"| Prometheus
 	Worker -.->|":9100/metrics"| Prometheus
 	Collector -.->|":9464/metrics"| Prometheus

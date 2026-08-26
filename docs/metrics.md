@@ -10,13 +10,14 @@ operations; the end-to-end system flow is documented in [Architecture](architect
 | --- | --- | --- | --- |
 | API metrics | FastAPI middleware and Python Prometheus client | Prometheus scrapes `/metrics/` every 15 seconds | Prometheus and Grafana |
 | Inference metrics | Temporal worker Activities and Python Prometheus client | Prometheus scrapes `:9100/metrics` every 15 seconds | Prometheus and Grafana |
+| MCP metrics | MCP discovery and invocation Activities | Same worker scrape target | Prometheus and Grafana |
 | Runtime metrics | Python Prometheus client process collectors | Same API and worker scrape targets | Prometheus and Grafana |
-| API request traces | OpenTelemetry FastAPI instrumentation | OTLP/gRPC to the collector, then batched OTLP to Tempo | Tempo and Grafana Explore |
+| Distributed traces | FastAPI instrumentation, Temporal interceptor, and Activity child spans | OTLP/gRPC to the collector, then batched OTLP to Tempo | Dashboard trace panel, Tempo, and Grafana Explore |
 | Collector metrics | OpenTelemetry Collector Prometheus exporter | Prometheus scrapes `:9464/metrics` | Prometheus and Grafana |
 
-The worker configures an OTLP trace provider, but the current application does not create
-worker Activity spans or install a Temporal tracing interceptor. The configured exporter
-is therefore plumbing for future instrumentation, not evidence of end-to-end traces.
+Temporal trace headers connect the API's workflow-start span to worker workflow and
+Activity spans. The inference and MCP Activities add child spans around external calls;
+payloads and credentials are deliberately excluded.
 
 ## Endpoints
 
@@ -56,6 +57,18 @@ mounted ASGI application or redirects may appear as `unmatched`.
 
 Activity retries produce a metric event for each attempt. An eventual workflow success may
 therefore coexist with earlier inference errors.
+
+### MCP Metrics
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `repo_agent_mcp_operations_total` | Counter | `operation`, `access`, `status` | Discovery and tool-call outcomes per Activity attempt |
+| `repo_agent_mcp_operation_duration_seconds` | Histogram | `operation`, `access` | End-to-end GitHub MCP session latency |
+| `repo_agent_mcp_results_truncated_total` | Counter | none | Tool results capped before entering workflow history |
+
+`operation` is `list_tools` or `call_tool`; `access` is `read_only` or `read_write`;
+`status` is `success`, `error`, or `unavailable`. Tool names are omitted from metrics to
+keep cardinality bounded and appear only as trace attributes.
 
 Neither worker metric includes workflow ID, repository, tool name, or provider account.
 That keeps cardinality bounded and avoids leaking user input, but it also means Prometheus
@@ -102,6 +115,8 @@ The provisioned **repo_agent overview** dashboard contains:
 - API request rate by method, route, and status
 - API p95 latency by route
 - Inference outcomes by status
+- Recent API, Temporal workflow, Activity, LLM, and MCP traces
+- MCP outcomes and p95 latency by operation and access mode
 - API and worker resident memory
 
 The default time range is one hour and panels refresh every ten seconds. Newly created
@@ -168,6 +183,25 @@ histogram_quantile(
 )
 ```
 
+MCP attempts by operation and outcome:
+
+```promql
+sum by (operation, access, status) (
+  increase(repo_agent_mcp_operations_total[1h])
+)
+```
+
+MCP p95 latency:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (le, operation, access) (
+    rate(repo_agent_mcp_operation_duration_seconds_bucket[15m])
+  )
+)
+```
+
 Resident memory by application process:
 
 ```promql
@@ -197,20 +231,22 @@ SLO or paging policy.
 
 ## Traces
 
-FastAPI instrumentation creates server spans with service name `repo-agent-api`. The API
-and worker both configure OTLP trace exporters, and the collector exports received spans
-to Tempo. The current worker has no explicit Activity spans, OpenAI/httpx client
-instrumentation, or Temporal OpenTelemetry interceptor, so a normal trace ends at the API
-boundary rather than following a run through Temporal, LiteLLM, and GitHub MCP.
+FastAPI instrumentation creates server spans with service name `repo-agent-api`, and model
+catalog requests add an `llm.list_models` child span. Both Temporal clients install the
+OpenTelemetry interceptor, which propagates context through workflow headers and creates
+client, workflow, and Activity spans. The worker adds `llm.inference`, `mcp.list_tools`,
+and `mcp.call_tool` child spans under the relevant Activity span. The collector exports all
+received spans to Tempo.
 
-Use Grafana **Explore**, select the Tempo data source, and filter by service name. Trace
-retention is local and follows the lifecycle of the `tempo-data` Docker volume.
+Use the dashboard's **Recent API and worker traces** panel or Grafana **Explore** with the
+Tempo data source. Filter by `service.name` equal to `repo-agent-api` or
+`repo-agent-worker`. Trace retention is local and follows the lifecycle of the
+`tempo-data` Docker volume.
 
-To produce a true end-to-end trace, add Temporal client/worker propagation and Activity
-spans around model discovery, inference, MCP discovery, and MCP invocation. Span attributes
-should use bounded values such as model alias, Activity name, attempt, and status. Do not
-attach prompts, tool results, credentials, workflow IDs as metric labels, or arbitrary
-repository names without a retention and privacy policy.
+Span attributes use operational metadata such as model alias, MCP operation, tool name,
+access mode, and result status. Do not add prompts, tool arguments/results, credentials,
+workflow IDs as metric labels, or arbitrary repository names without a retention and
+privacy policy.
 
 OpenTelemetry uses a batch span processor. Batching lowers request overhead but can lose
 recent spans on abrupt process termination. The current code also uses the default sampler,
@@ -224,11 +260,10 @@ add the following in priority order:
 
 1. Workflow completion, failure, cancellation, and durable end-to-end duration metrics.
 2. Temporal schedule-to-start latency and task-queue backlog for worker capacity planning.
-3. MCP discovery/call counts, latency, tool category, truncation, and error status.
-4. LiteLLM/provider token counts, rate-limit responses, estimated cost, and time to first
+3. LiteLLM/provider token counts, rate-limit responses, estimated cost, and time to first
   token where the provider exposes them.
-5. Ollama host CPU, accelerator, memory, queue depth, and model-load duration.
-6. PostgreSQL, Temporal Server, Prometheus, Tempo, and container-level health metrics.
+4. Ollama host CPU, accelerator, memory, queue depth, and model-load duration.
+5. PostgreSQL, Temporal Server, Prometheus, Tempo, and container-level health metrics.
 
 Keep labels bounded. Model aliases, operation classes, and status codes are suitable;
 prompts, workflow IDs, commit SHAs, repository names, and exception messages are usually
@@ -270,6 +305,7 @@ done
 If Grafana has no dashboard at all, recreate it so file provisioning runs. Do not delete
 `grafana-data` unless losing local Grafana state is acceptable.
 
-If metrics exist but traces do not, first trigger an API request and search Tempo for
-`service.name = repo-agent-api`. Do not expect `repo-agent-worker` Activity spans until
-worker instrumentation is implemented.
+If metrics exist but traces do not, submit a new workflow after recreating the API and
+worker containers. Search Tempo for `service.name = repo-agent-api`, then open its workflow
+start span to follow the trace into `repo-agent-worker`. Check collector logs and the
+`:9464` target if either service is absent.

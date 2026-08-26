@@ -9,6 +9,7 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse
+from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from prometheus_client import Counter, Histogram, make_asgi_app
 from pydantic import BaseModel, Field
@@ -16,6 +17,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 from starlette.types import ASGIApp
 from temporalio.client import Client, WorkflowFailureError
+from temporalio.contrib.opentelemetry import TracingInterceptor
 
 from repo_agent.contracts import AgentRequest, AgentResult
 from repo_agent.settings import get_settings
@@ -36,6 +38,7 @@ WORKFLOWS_STARTED = Counter(
     "repo_agent_workflows_started_total",
     "Agent workflows accepted by the API",
 )
+TRACER = trace.get_tracer(__name__)
 
 
 class RunCreate(BaseModel):
@@ -78,6 +81,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.temporal = await Client.connect(
         settings.temporal_host,
         namespace=settings.temporal_namespace,
+        interceptors=[TracingInterceptor()],
     )
     yield
 
@@ -118,9 +122,13 @@ def temporal_client(request: Request) -> Client:
 async def available_models() -> list[str]:
     settings = get_settings()
     headers = {"Authorization": f"Bearer {settings.llm_api_key}"}
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.get(f"{settings.llm_base_url.rstrip('/')}/models", headers=headers)
-        response.raise_for_status()
+    with TRACER.start_as_current_span("llm.list_models"):
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{settings.llm_base_url.rstrip('/')}/models",
+                headers=headers,
+            )
+            response.raise_for_status()
     model_ids = {model.id for model in LiteLLMModelList.model_validate_json(response.content).data}
     return sorted(model_ids, key=lambda model_id: (model_id != "agent-default", model_id))
 

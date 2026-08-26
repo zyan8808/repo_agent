@@ -67,7 +67,7 @@ flowchart TB
     MCP -->|"tools and results, 100,000 character cap"| GitHubMCP
     Temporal -->|"durable state"| Postgres
     API -.->|"FastAPI request spans via OTLP"| Collector
-    Worker -.->|"OTLP provider configured; Activity spans are a gap"| Collector
+   Worker -.->|"Temporal workflow, Activity, LLM, and MCP spans"| Collector
     API -.->|"/metrics"| Prometheus
     Worker -.->|":9100/metrics"| Prometheus
     Collector -.->|":9464/metrics"| Prometheus
@@ -91,7 +91,7 @@ on the Compose network, published ports bind to `127.0.0.1`, and Ollama runs on 
 | Capability plane | GitHub MCP, MCP Python SDK 1.29+, Streamable HTTP | Discover typed GitHub tools and execute authenticated calls | External service boundary; narrowed by toolsets and write controls |
 | Workflow database | PostgreSQL 16 | Persist Temporal workflow history and Activity results | Recovery-critical state; local single instance is not highly available |
 | Metrics | prometheus-client and Prometheus 3.6 | Export and retain application, process, and collector time series | Pull-based, local volume retention, 15-second resolution |
-| Tracing | OpenTelemetry Collector 0.136 and Tempo 2.8 | Receive, batch, retain, and query distributed traces | API request spans exist; worker Activity spans are not yet instrumented |
+| Tracing | Temporal OpenTelemetry interceptor, OpenTelemetry Collector 0.136, and Tempo 2.8 | Propagate API context through workflows and Activities, retain spans, and support trace queries | Local storage and default sampling favor development over high-volume retention |
 | Visualization | Grafana 12.1 | Provision dashboards and query Prometheus and Tempo | Local anonymous Admin mode is development-only |
 
 ## End-to-End Request Walkthrough
@@ -188,11 +188,15 @@ unique Prometheus label for every workflow ID. Inference metrics measure each Ac
 attempt, so retries are visible as separate successes or failures. Prometheus scrapes the
 API, worker, and collector every 15 seconds.
 
-FastAPI is explicitly instrumented and sends request spans over OTLP/gRPC to the collector,
-which batches and forwards them to Tempo. The worker configures an OTLP trace provider,
-but the current code does not create Activity spans or install a Temporal tracing
-interceptor. End-to-end API-to-workflow traces are therefore a known gap, not a current
-guarantee. Metric definitions and trace troubleshooting live in
+FastAPI is explicitly instrumented and sends request spans over OTLP/gRPC to the collector.
+Temporal's OpenTelemetry interceptor injects that context into workflow headers and
+extracts it in the worker, producing client, workflow, and Activity spans. Inference and
+MCP Activities add child spans around their external operations without recording prompts,
+tool results, or credentials. The collector batches and forwards spans to Tempo.
+
+Prometheus also records bounded MCP operation outcomes and latency by operation, access
+mode, and status. Tool names stay in traces rather than metric labels to avoid cardinality
+growth. Metric definitions and trace troubleshooting live in
 [Metrics and observability](metrics.md).
 
 ## Design Tradeoffs
@@ -208,6 +212,7 @@ guarantee. Metric definitions and trace troubleshooting live in
 | Pull-based Prometheus metrics | Simple local operations and mature PromQL | Scrape delay and local retention only | Remote write to managed long-term storage |
 | Local Tempo storage | Low setup cost and easy trace exploration | Volume loss removes history; no HA | Object storage, retention policy, and replicated Tempo deployment |
 | Browser polling | Simple client and stateless API | Repeated HTTP traffic and delayed updates | Server-sent events or WebSockets backed by Temporal queries/signals |
+| Temporal trace propagation | Connects API, workflow, Activity, LLM, and MCP spans | More spans and local storage consumption | Tail sampling and retention policy at higher throughput |
 
 ## Failure Modes and Recovery
 
@@ -241,9 +246,9 @@ Scale the bottleneck that telemetry demonstrates rather than scaling every conta
    making automated routing or capacity decisions.
 
 The current Compose deployment prioritizes understandable local behavior over high
-availability. Its most important production gaps are API authentication, end-to-end worker
-tracing, mutation idempotency, rate limiting, durable backups, and provider-aware capacity
-management.
+availability. Its most important production gaps are API authentication, durable workflow
+outcome metrics, mutation idempotency, rate limiting, durable backups, and provider-aware
+capacity management.
 
 ## Persisted Local Data
 

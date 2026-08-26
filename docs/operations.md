@@ -249,7 +249,7 @@ Before a shared or public deployment, add:
 6. Network policies that restrict direct access to Temporal, LiteLLM, telemetry ports, and
 	 database services.
 7. Structured audit logs and provider-supported idempotency for mutating GitHub calls.
-8. End-to-end Temporal/Activity tracing and alerts for queue, provider, and MCP failures.
+8. Alerts for queue, provider, MCP, and workflow-outcome failures.
 
 For the reasoning behind these boundaries, see [Architecture](architecture.md). For the
 signals used to operate them, see [Metrics and observability](metrics.md).

@@ -48,3 +48,13 @@ def test_mcp_types_are_adapted_for_the_model() -> None:
     assert definition.input_schema["type"] == "object"
     assert "README contents" in result.content
     assert result.is_error is False
+
+
+def test_mcp_results_are_truncated_before_workflow_history() -> None:
+    result = mcp_tool_result(
+        CallToolResult(content=[TextContent(type="text", text="sensitive result")]),
+        max_chars=10,
+    )
+
+    assert result.content.endswith("[tool result truncated]")
+    assert "sensitive result" not in result.content

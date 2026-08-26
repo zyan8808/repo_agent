@@ -3,6 +3,7 @@ import logging
 
 from prometheus_client import start_http_server
 from temporalio.client import Client
+from temporalio.contrib.opentelemetry import TracingInterceptor
 from temporalio.worker import Worker
 
 from repo_agent.activities import call_mcp_tool, list_mcp_tools, run_inference
@@ -19,6 +20,7 @@ async def serve() -> None:
     client = await Client.connect(
         settings.temporal_host,
         namespace=settings.temporal_namespace,
+        interceptors=[TracingInterceptor()],
     )
     worker = Worker(
         client,
