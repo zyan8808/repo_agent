@@ -19,8 +19,10 @@ from repo_agent.contracts import (
     McpToolDefinition,
     McpToolList,
     McpToolListRequest,
+    TokenUsage,
     ToolCall,
 )
+from repo_agent.pricing import estimate_cost_usd
 from repo_agent.settings import get_settings
 
 INFERENCE_CALLS = Counter(
@@ -31,6 +33,16 @@ INFERENCE_CALLS = Counter(
 INFERENCE_LATENCY = Histogram(
     "repo_agent_inference_duration_seconds",
     "Inference Activity latency",
+    ["model"],
+)
+INFERENCE_TOKENS = Counter(
+    "repo_agent_inference_tokens_total",
+    "Prompt and completion tokens consumed by inference calls",
+    ["model", "kind"],  # kind: "prompt" or "completion"
+)
+INFERENCE_COST_USD = Counter(
+    "repo_agent_inference_cost_usd_total",
+    "Estimated USD cost of inference calls, by model alias",
     ["model"],
 )
 MCP_OPERATIONS = Counter(
@@ -232,25 +244,47 @@ async def run_inference(request: InferenceRequest) -> InferenceResult:
                         messages=request.messages,  # type: ignore[arg-type]
                     )
             span.set_attribute("gen_ai.response.model", response.model)
-        message = response.choices[0].message
-        tool_calls: list[ToolCall] = []
-        for tool_call in message.tool_calls or []:
-            if tool_call.type != "function":
-                continue
-            tool_calls.append(
-                ToolCall(
-                    id=tool_call.id,
-                    name=tool_call.function.name,
-                    arguments=tool_call.function.arguments,
+            message = response.choices[0].message
+            tool_calls: list[ToolCall] = []
+            for tool_call in message.tool_calls or []:
+                if tool_call.type != "function":
+                    continue
+                tool_calls.append(
+                    ToolCall(
+                        id=tool_call.id,
+                        name=tool_call.function.name,
+                        arguments=tool_call.function.arguments,
+                    )
                 )
-            )
-        if message.content is None and not tool_calls:
-            raise ValueError("Inference response did not contain text or tool calls")
+            if message.content is None and not tool_calls:
+                raise ValueError("Inference response did not contain text or tool calls")
+
+            usage = None
+            if response.usage is not None:
+                prompt_tokens = response.usage.prompt_tokens
+                completion_tokens = response.usage.completion_tokens
+                cost = estimate_cost_usd(request.model, prompt_tokens, completion_tokens)
+                INFERENCE_TOKENS.labels(model=request.model, kind="prompt").inc(prompt_tokens)
+                INFERENCE_TOKENS.labels(model=request.model, kind="completion").inc(
+                    completion_tokens
+                )
+                INFERENCE_COST_USD.labels(model=request.model).inc(cost)
+                span.set_attribute("gen_ai.usage.prompt_tokens", prompt_tokens)
+                span.set_attribute("gen_ai.usage.completion_tokens", completion_tokens)
+                span.set_attribute("gen_ai.usage.cost_usd", cost)
+                usage = TokenUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=response.usage.total_tokens,
+                    estimated_cost_usd=cost,
+                )
+
         INFERENCE_CALLS.labels(model=request.model, status="success").inc()
         return InferenceResult(
             content=message.content,
             model=response.model,
             tool_calls=tool_calls,
+            usage=usage,
         )
     except Exception:
         INFERENCE_CALLS.labels(model=request.model, status="error").inc()

@@ -70,6 +70,8 @@ class AgentWorkflow:
             {"role": "user", "content": request.prompt},
         ]
 
+        total_tokens = 0
+        total_cost = 0.0
         for _ in range(12):
             result = await workflow.execute_activity(
                 "run_inference",
@@ -82,10 +84,18 @@ class AgentWorkflow:
                 retry_policy=retry_policy,
                 result_type=InferenceResult,
             )
+            if result.usage is not None:
+                total_tokens += result.usage.total_tokens
+                total_cost += result.usage.estimated_cost_usd
             if not result.tool_calls:
                 if result.content is None:
                     raise ValueError("Inference completed without a final response")
-                return AgentResult(output=result.content, model=result.model)
+                return AgentResult(
+                    output=result.content,
+                    model=result.model,
+                    total_tokens=total_tokens,
+                    estimated_cost_usd=total_cost,
+                )
 
             messages.append(
                 {

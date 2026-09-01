@@ -60,6 +60,8 @@ class RunOutput(BaseModel):
     workflow_id: str
     output: str
     model: str
+    total_tokens: int
+    estimated_cost_usd: float
 
 
 class ModelOption(BaseModel):
@@ -197,6 +199,8 @@ async def get_run_result(workflow_id: str, request: Request) -> RunOutput:
         workflow_id=workflow_id,
         output=result.output,
         model=result.model,
+        total_tokens=result.total_tokens,
+        estimated_cost_usd=result.estimated_cost_usd,
     )
 
 

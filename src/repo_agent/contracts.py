@@ -13,6 +13,8 @@ class AgentRequest:
 class AgentResult:
     output: str
     model: str
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -30,10 +32,19 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
+class TokenUsage:
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float
+
+
+@dataclass(frozen=True)
 class InferenceResult:
     content: str | None
     model: str
     tool_calls: list[ToolCall]
+    usage: TokenUsage | None = None
 
 
 @dataclass(frozen=True)
