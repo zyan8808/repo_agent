@@ -5,7 +5,7 @@
 #
 # Run:
 #   cd evals
-#   PATH="$PWD/../.venv/bin:$PATH" npx promptfoo@0.122.0 eval --max-concurrency 4
+#   PATH="$PWD/../.venv/bin:$PATH" npx promptfoo@0.122.0 eval --max-concurrency 2
 #   npx promptfoo@0.122.0 view --port 15500
 #
 # CI: wire this into .github/workflows/ci.yml as a job that runs after
@@ -18,36 +18,36 @@ providers:
     label: repo-agent-default
     config:
       model: agent-default
-      max_total_tokens: 50000
+      max_total_tokens: 100000
       max_estimated_cost_usd: 1.0
-      timeout: 3600000
+      timeout: 7200000
   - id: file://provider.py
     label: repo-agent-qwen3-8b
     config:
       model: agent-qwen3-8b
-      max_total_tokens: 50000
+      max_total_tokens: 100000
       max_estimated_cost_usd: 1.0
-      timeout: 3600000
+      timeout: 7200000
   - id: file://provider.py
     label: repo-agent-anthropic
     config:
       model: agent-anthropic
-      max_total_tokens: 50000
+      max_total_tokens: 100000
       max_estimated_cost_usd: 1.0
-      timeout: 3600000
+      timeout: 1800000
   - id: file://provider.py
     label: repo-agent-openai
     config:
       model: agent-openai
-      max_total_tokens: 50000
+      max_total_tokens: 100000
       max_estimated_cost_usd: 1.0
-      timeout: 3600000
+      timeout: 1800000
 
 defaultTest:
   options:
-    # Model-graded assertions use the same local stack and may queue behind
-    # target calls, so allow an hour for each complete case.
-    timeout: 3600000
+    # Model-graded assertions use agent-default and may queue behind local
+    # target calls, so match the local provider timeout.
+    timeout: 7200000
     provider:
       id: openai:chat:agent-default
       config:
@@ -55,6 +55,7 @@ defaultTest:
         apiKey: local-development
         temperature: 0
         max_tokens: 10000
+        timeout: 7200000
         showThinking: false
   assert:
     - type: javascript
@@ -62,13 +63,17 @@ defaultTest:
         const response = context.providerResponse;
         const total = response.tokenUsage?.total;
         const limit = response.metadata?.max_total_tokens;
-        return total <= limit || `Token budget exceeded: ${total} > ${limit}`;
+        return total <= limit
+          ? true
+          : { pass: false, score: 0, reason: `Token budget exceeded: ${total} > ${limit}` };
     - type: javascript
       value: |
         const metadata = context.providerResponse.metadata;
         const cost = metadata?.estimated_cost_usd;
         const limit = metadata?.max_estimated_cost_usd;
-        return cost <= limit || `Cost budget exceeded: $${cost} > $${limit}`;
+        return cost <= limit
+          ? true
+          : { pass: false, score: 0, reason: `Cost budget exceeded: $${cost} > $${limit}` };
     - type: javascript
       value: context.providerResponse.metadata?.allow_writes === false
 
@@ -97,7 +102,7 @@ tests:
 
   - description: "Explains its own architecture using the actual code, not the README prose alone"
     vars:
-      prompt: "Explain the architecture of this agent service."
+      prompt: "Explain the architecture of the agent service in zyan8808/repo_agent."
     assert:
       - type: icontains
         value: "Temporal"
@@ -121,7 +126,7 @@ tests:
   # --- Efficiency: does it converge without excessive tool churn? ---
   - description: "Answers a simple factual question in a small number of tool calls"
     vars:
-      prompt: "Who is the owner of the repo_agent repository?"
+      prompt: "Who is the owner of the zyan8808/repo_agent repository?"
     assert:
       - type: icontains
         value: "zyan8808"

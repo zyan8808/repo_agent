@@ -93,7 +93,7 @@ class AgentWorkflow:
                     model=request.model,
                     tools=[openai_tool(tool) for tool in mcp_tools.tools] or None,
                 ),
-                start_to_close_timeout=timedelta(minutes=10),
+                start_to_close_timeout=timedelta(minutes=30),
                 retry_policy=retry_policy,
                 result_type=InferenceResult,
             )

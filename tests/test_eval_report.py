@@ -72,3 +72,34 @@ def test_render_report_summarizes_models_and_failures() -> None:
     assert "Expected grounded output" in report
     assert "Provider authentication failed" in report
     assert "## Failures and Errors" in report
+
+
+def test_render_report_lists_merged_eval_sources() -> None:
+    exported_eval: dict[str, Any] = {
+        "evalId": "eval-merged",
+        "metadata": {
+            "sourceEvalIds": ["eval-base", "eval-replacement"],
+            "replacedProvider": "repo-agent-anthropic",
+        },
+        "config": {"description": "merged suite", "providers": []},
+        "results": {
+            "timestamp": "2026-09-01T00:00:00.000Z",
+            "stats": {"successes": 1, "failures": 0, "errors": 0, "durationMs": 1},
+            "results": [
+                {
+                    "success": True,
+                    "provider": {"label": "repo-agent-anthropic"},
+                    "tokenUsage": {},
+                    "response": {},
+                    "testCase": {},
+                }
+            ],
+        },
+    }
+
+    report = render_report(exported_eval, "http://localhost:15500")
+
+    assert "Sources: [`eval-base`]" in report
+    assert "[`eval-replacement`]" in report
+    assert "python merge.py /tmp/eval-base.json /tmp/eval-replacement.json" in report
+    assert "--provider repo-agent-anthropic --eval-id eval-merged" in report

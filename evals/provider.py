@@ -18,18 +18,22 @@ from typing import Any
 import httpx
 
 BASE_URL = os.environ.get("REPO_AGENT_EVAL_BASE_URL", "http://localhost:8000")
-# /runs/{id}/result blocks server-side until the workflow finishes, so the
-# client timeout just needs to be longer than the slowest expected run
-# (the workflow itself caps inference at 10 min/iteration, 12 iterations max).
-RESULT_TIMEOUT_SECONDS = float(os.environ.get("REPO_AGENT_EVAL_TIMEOUT_SECONDS", "3600"))
+# /runs/{id}/result blocks server-side until the workflow finishes. Provider-specific
+# Promptfoo timeouts are milliseconds; the environment variable remains a seconds-based
+# fallback for ad hoc provider configurations.
+DEFAULT_RESULT_TIMEOUT_SECONDS = float(
+    os.environ.get("REPO_AGENT_EVAL_TIMEOUT_SECONDS", "7200")
+)
 
 
 def call_api(prompt: str, options: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     config = options.get("config", {})
     model = config.get("model", "agent-default")
     allow_writes = bool(config.get("allow_writes", False))
-    max_total_tokens = int(config.get("max_total_tokens", 50_000))
+    max_total_tokens = int(config.get("max_total_tokens", 100_000))
     max_estimated_cost_usd = float(config.get("max_estimated_cost_usd", 1.0))
+    timeout_milliseconds = config.get("timeout", DEFAULT_RESULT_TIMEOUT_SECONDS * 1000)
+    result_timeout_seconds = float(timeout_milliseconds) / 1000
 
     with httpx.Client(base_url=BASE_URL, timeout=30) as client:
         create_response = client.post(
@@ -47,7 +51,7 @@ def call_api(prompt: str, options: dict[str, Any], context: dict[str, Any]) -> d
 
         result_response = client.get(
             f"/runs/{workflow_id}/result",
-            timeout=RESULT_TIMEOUT_SECONDS,
+            timeout=result_timeout_seconds,
         )
         if result_response.status_code == 409:
             return {"error": f"Workflow {workflow_id} failed: {result_response.text}"}

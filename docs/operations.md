@@ -34,8 +34,9 @@ ignores it.
 | `LOCAL_MODEL` | `qwen3.8:27b` | Ollama model routed through the `agent-default` alias |
 | `LITELLM_MASTER_KEY` | `local-development` | Authentication key enforced by the LiteLLM gateway |
 | `REPO_AGENT_LLM_API_KEY` | `local-development` | API key sent from the API and worker to LiteLLM |
-| `ANTHROPIC_API_KEY` | empty | Anthropic credential used only by LiteLLM |
+| `ANTHROPIC_API_KEY` | empty | Anthropic Console API key used only by LiteLLM |
 | `ANTHROPIC_MODEL` | `anthropic/claude-sonnet-4-5-20250929` | Model routed through `agent-anthropic` |
+| `ANTHROPIC_WORKSPACE_ID` | empty | Workspace selected for a multi-workspace Anthropic key |
 | `OPENAI_API_KEY` | empty | OpenAI credential used only by LiteLLM |
 | `OPENAI_MODEL` | `openai/gpt-5-mini` | Model routed through `agent-openai` |
 | `GITHUB_TOKEN` | empty | Required PAT for the non-interactive GitHub MCP client |
@@ -284,7 +285,10 @@ docker compose up -d --force-recreate litellm
 ### Anthropic Requests Fail
 
 Confirm `ANTHROPIC_API_KEY` is set in `.env` and `ANTHROPIC_MODEL` names a model available
-to that account. Recreate LiteLLM after changing either value, then inspect only its logs:
+to that account. If Anthropic reports that `anthropic-workspace-id` is required, set
+`ANTHROPIC_WORKSPACE_ID` to the workspace's `wrkspc_...` ID from Claude Console. The
+LiteLLM startup wrapper adds it to direct Anthropic requests. Recreate LiteLLM after changing
+any of these values, then inspect only its logs:
 
 ```bash
 docker compose up -d --force-recreate litellm

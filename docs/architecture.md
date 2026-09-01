@@ -20,7 +20,7 @@ flowchart TB
         Temporal["Workflow engine<br/>Temporal Server 1.28.1<br/>durable history, timers, retries"]
         Worker["Agent worker<br/>Python 3.12 and Temporal SDK 1.15+<br/>repo-agent task queue"]
         Loop["AgentWorkflow<br/>discover tools, infer, invoke tools<br/>maximum 12 inference iterations"]
-        Infer["run_inference Activity<br/>OpenAI SDK 2.20+<br/>10 minute timeout, up to 4 attempts"]
+      Infer["run_inference Activity<br/>OpenAI SDK 2.20+<br/>30 minute timeout, up to 4 attempts"]
         MCP["MCP Activities<br/>MCP SDK 1.29+ and httpx<br/>Streamable HTTP, 3/5 minute timeouts"]
 
         Temporal <-->|"workflow and Activity tasks"| Worker
@@ -109,8 +109,9 @@ on the Compose network, published ports bind to `127.0.0.1`, and Ollama runs on 
    catalog and the run can still answer without tools.
 6. The worker connects to GitHub MCP over Streamable HTTP, initializes a session, follows
    pagination, and converts each MCP schema into an OpenAI function definition.
-7. The workflow schedules `run_inference` with the selected alias, accumulated messages,
-   and current tool schemas. LiteLLM resolves the alias to Ollama, Anthropic, or OpenAI.
+7. The workflow schedules `run_inference` with a 30-minute start-to-close timeout, the
+   selected alias, accumulated messages, and current tool schemas. LiteLLM resolves the
+   alias to Ollama, Anthropic, or OpenAI.
 8. A final text response completes the workflow. Tool calls are validated against the
    discovered catalog, parsed as JSON objects, and executed through `call_mcp_tool`.
 9. Tool results are serialized into workflow history and fed back to the model. Results

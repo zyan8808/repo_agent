@@ -24,6 +24,13 @@ def _duration(milliseconds: int | float) -> str:
 
 def render_report(export: dict[str, Any], server_url: str) -> str:
     eval_id = str(export["evalId"])
+    metadata = _mapping(export.get("metadata"))
+    raw_source_eval_ids = metadata.get("sourceEvalIds")
+    source_eval_ids = (
+        [str(source_id) for source_id in cast(list[object], raw_source_eval_ids)]
+        if isinstance(raw_source_eval_ids, list)
+        else []
+    )
     result_set = export["results"]
     results: list[dict[str, Any]] = result_set["results"]
     stats: dict[str, Any] = result_set["stats"]
@@ -56,11 +63,20 @@ def render_report(export: dict[str, Any], server_url: str) -> str:
         f"Promptfoo eval: [`{eval_id}`]({server_url.rstrip('/')}/eval/{eval_id})  ",
         f"Started: `{result_set['timestamp']}`  ",
         f"Suite: {_cell(export['config'].get('description', ''))}",
-        "",
-        "## Overall",
-        "",
-        "| Passed | Failed | Errors | Pass rate | Agent tokens | Grader tokens | "
-        "Estimated agent cost | Duration |",
+    ]
+    if source_eval_ids:
+        sources = ", ".join(
+            f"[`{_cell(source_id)}`]({server_url.rstrip('/')}/eval/{_cell(source_id)})"
+            for source_id in source_eval_ids
+        )
+        lines.append(f"Sources: {sources}")
+    lines.extend(
+        [
+            "",
+            "## Overall",
+            "",
+            "| Passed | Failed | Errors | Pass rate | Agent tokens | Grader tokens | "
+            "Estimated agent cost | Duration |",
         "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         f"| {successes} | {failures} | {errors} | "
         f"{successes / len(results):.0%} | {agent_tokens:,} | {grader_tokens:,} | "
@@ -69,9 +85,10 @@ def render_report(export: dict[str, Any], server_url: str) -> str:
         "## Models",
         "",
         "| Provider | Model alias | Passed | Pass rate | Agent tokens | "
-        "Estimated agent cost | Average latency | Token limit |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
-    ]
+        "Estimated agent cost | Average latency | Token limit | Timeout |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
 
     for label, provider in providers.items():
         provider_results = grouped.get(label, [])
@@ -99,7 +116,8 @@ def render_report(export: dict[str, Any], server_url: str) -> str:
         lines.append(
             f"| {_cell(label)} | `{_cell(config.get('model', ''))}` | {passed}/{total} | "
             f"{pass_rate} | {tokens:,} | ${cost:.4f} | {_duration(average_latency)} | "
-            f"{int(config.get('max_total_tokens', 0)):,} |"
+            f"{int(config.get('max_total_tokens', 0)):,} | "
+            f"{_duration(config.get('timeout', 0))} |"
         )
 
     unsuccessful_results = [result for result in results if not result["success"]]
@@ -134,8 +152,25 @@ def render_report(export: dict[str, Any], server_url: str) -> str:
             "",
             "```bash",
             "cd evals",
-            "npx promptfoo@0.122.0 eval -c promptfooconfig.yaml",
-            f"npx promptfoo@0.122.0 export eval {eval_id} --output /tmp/{eval_id}.json",
+            'PATH="$PWD/../.venv/bin:$PATH" npx promptfoo@0.122.0 eval \\',
+            "  -c promptfooconfig.yaml --no-cache --max-concurrency 2",
+        ]
+    )
+    if len(source_eval_ids) == 2:
+        lines.extend(
+            [
+                f"python merge.py /tmp/{source_eval_ids[0]}.json /tmp/{source_eval_ids[1]}.json \\",
+                f"  --provider {metadata.get('replacedProvider', '')} --eval-id {eval_id} \\",
+                f"  --output /tmp/{eval_id}.json",
+                f"npx promptfoo@0.122.0 import /tmp/{eval_id}.json",
+            ]
+        )
+    else:
+        lines.append(
+            f"npx promptfoo@0.122.0 export eval {eval_id} --output /tmp/{eval_id}.json"
+        )
+    lines.extend(
+        [
             f"python report.py /tmp/{eval_id}.json --output {eval_id}.md",
             "npx promptfoo@0.122.0 view --port 15500",
             "```",

@@ -34,7 +34,7 @@ flowchart TB
 		Temporal["Workflow engine<br/>Temporal Server 1.28.1<br/>durable history, timers, retries"]
 		Worker["Agent worker<br/>Python 3.12 and Temporal SDK 1.15+<br/>repo-agent task queue"]
 		Loop["AgentWorkflow<br/>discover tools, infer, invoke tools<br/>maximum 12 inference iterations"]
-		Infer["run_inference Activity<br/>OpenAI SDK 2.20+<br/>10 minute timeout, up to 4 attempts"]
+		Infer["run_inference Activity<br/>OpenAI SDK 2.20+<br/>30 minute timeout, up to 4 attempts"]
 		MCP["MCP Activities<br/>MCP SDK 1.29+ and httpx<br/>Streamable HTTP, 3/5 minute timeouts"]
 
 		Temporal <-->|"workflow and Activity tasks"| Worker
@@ -228,12 +228,27 @@ routes after populating their API keys in `.env`:
 ```bash
 cd evals
 PATH="$PWD/../.venv/bin:$PATH" npx promptfoo@0.122.0 eval \
-	-c promptfooconfig.yaml --no-cache --max-concurrency 4
+	-c promptfooconfig.yaml --no-cache --max-concurrency 2
 npx promptfoo@0.122.0 view --port 15500
 ```
 
-Each of the 20 model/task runs has a 50,000-token and $1 estimated-cost ceiling. See the
-[eval guide](evals/README.md) for prerequisites and Markdown report generation.
+Each of the 20 model/task runs has a 100,000-token and $1 estimated-cost ceiling. Local cases
+allow two hours; hosted cases allow 30 minutes. See the [eval guide](evals/README.md) for
+credentials, timeout rationale, and Markdown report generation.
+
+The latest completed baseline is
+[eval-MRG-2026-09-01T23:21:54](evals/eval-MRG-2026-09-01T23-21-54.md): 16 passes, 2
+assertion failures, and 2 timeout errors across 20 cases. This imported Promptfoo record
+combines the completed default, Qwen, and OpenAI cases from `eval-Lut` with the repaired
+Anthropic cases from `eval-gtx`. Anthropic passed 5/5 after the gateway began supplying the
+workspace ID required by the multi-workspace key.
+
+The 100,000-token change was verified by a focused rerun of the OpenAI owner task:
+[eval-CVq-2026-09-01T20:03:39](evals/eval-CVq-2026-09-01T20-03-39.md) passed in 14.3 seconds
+using 11,740 tokens. The updated Anthropic credential is not expired, but Anthropic rejects
+requests without a workspace selector. Set `ANTHROPIC_WORKSPACE_ID` for multi-workspace
+personal or service-account keys; the LiteLLM startup wrapper adds the required provider
+header.
 
 The main code is organized as follows:
 
