@@ -30,6 +30,8 @@ Set `REPO_AGENT_EVAL_BASE_URL` if the API isn't on `http://localhost:8000`.
 Set `REPO_AGENT_EVAL_TIMEOUT_SECONDS` to override the provider's 600-second result timeout.
 The checked-in providers cap each run at 25,000 tokens and an estimated $1.00. Hosted evals
 consume provider credits; run them only when that cost is intentional.
+Model-graded assertions use the local `agent-default` LiteLLM route, so filtering the eval
+to `repo-agent-default` does not invoke a paid grader.
 
 ## Adding a task
 

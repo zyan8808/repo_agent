@@ -20,18 +20,28 @@ providers:
       model: agent-default
       max_total_tokens: 25000
       max_estimated_cost_usd: 1.0
+      timeout: 600000
   - id: file://provider.py
     label: repo-agent-anthropic
     config:
       model: agent-anthropic
       max_total_tokens: 25000
       max_estimated_cost_usd: 1.0
+      timeout: 600000
 
 defaultTest:
   options:
     # Each task gets one MCP round-trip's worth of budget; slow local
     # models shouldn't fail the eval on latency alone.
     timeout: 600000
+    provider:
+      id: openai:chat:agent-default
+      config:
+        apiBaseUrl: http://localhost:4000/v1
+        apiKey: local-development
+        temperature: 0
+        max_tokens: 10000
+        showThinking: false
   assert:
     - type: javascript
       value: |
