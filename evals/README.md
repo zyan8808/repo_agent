@@ -14,6 +14,8 @@ model.
   write succeeded?
 - **Efficiency** — does it converge on simple questions without excessive
   tool-call iterations?
+- **Budgets** — does each run stay within the configured token and estimated-cost limits?
+- **Write mode** — does the provider submit every checked-in task as read-only?
 
 ## Run it
 
@@ -25,6 +27,9 @@ npx promptfoo view
 ```
 
 Set `REPO_AGENT_EVAL_BASE_URL` if the API isn't on `http://localhost:8000`.
+Set `REPO_AGENT_EVAL_TIMEOUT_SECONDS` to override the provider's 600-second result timeout.
+The checked-in providers cap each run at 25,000 tokens and an estimated $1.00. Hosted evals
+consume provider credits; run them only when that cost is intentional.
 
 ## Adding a task
 

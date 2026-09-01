@@ -24,3 +24,6 @@ def test_dashboard_exposes_worker_traces_and_mcp_metrics() -> None:
     )
     assert "repo_agent_mcp_operations_total" in prometheus_queries
     assert "repo_agent_mcp_operation_duration_seconds_bucket" in prometheus_queries
+    assert "repo_agent_inference_tokens_total" in prometheus_queries
+    assert "repo_agent_inference_cost_usd_total" in prometheus_queries
+    assert "repo_agent_inference_usage_gaps_total" in prometheus_queries

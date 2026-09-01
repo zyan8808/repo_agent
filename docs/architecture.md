@@ -166,6 +166,14 @@ boundaries. A production router could add health-aware fallback, but should requ
 explicit policy for privacy, cost ceilings, and whether model changes within one durable
 run are acceptable.
 
+Each request carries token and estimated-cost limits, defaulting to 100,000 tokens and
+$5.00. The workflow accumulates provider-reported usage after every inference; if usage is
+absent, the Activity estimates tokens and marks the final result accordingly. Pricing uses
+the resolved provider model when LiteLLM knows it, explicit hosted-alias fallbacks when it
+does not, and explicit zero per-token cost for local Ollama aliases. Limits are checked
+after each successful call, so they stop continued execution but cannot prevent one call
+from crossing a threshold. Failed retries can also have unreported provider charges.
+
 ## Security Boundaries
 
 Provider credentials exist only in the LiteLLM container. The GitHub token exists only in
@@ -194,9 +202,9 @@ extracts it in the worker, producing client, workflow, and Activity spans. Infer
 MCP Activities add child spans around their external operations without recording prompts,
 tool results, or credentials. The collector batches and forwards spans to Tempo.
 
-Prometheus also records bounded MCP operation outcomes and latency by operation, access
-mode, and status. Tool names stay in traces rather than metric labels to avoid cardinality
-growth. Metric definitions and trace troubleshooting live in
+Prometheus also records bounded inference token, estimated-cost, usage-gap, and MCP
+operation metrics. Tool names stay in traces rather than metric labels to avoid
+cardinality growth. Metric definitions and trace troubleshooting live in
 [Metrics and observability](metrics.md).
 
 ## Design Tradeoffs

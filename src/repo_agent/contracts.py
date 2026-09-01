@@ -7,6 +7,8 @@ class AgentRequest:
     prompt: str
     allow_writes: bool = False
     model: str = "agent-default"
+    max_total_tokens: int = 100_000
+    max_estimated_cost_usd: float = 5.0
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,7 @@ class AgentResult:
     model: str
     total_tokens: int = 0
     estimated_cost_usd: float = 0.0
+    usage_is_estimated: bool = False
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,7 @@ class TokenUsage:
     completion_tokens: int
     total_tokens: int
     estimated_cost_usd: float
+    is_estimated: bool = False
 
 
 @dataclass(frozen=True)

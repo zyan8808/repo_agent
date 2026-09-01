@@ -54,9 +54,15 @@ mounted ASGI application or redirects may appear as `unmatched`.
 | --- | --- | --- | --- |
 | `repo_agent_inference_calls_total` | Counter | `model`, `status` | Inference Activity outcomes, where status is `success` or `error` |
 | `repo_agent_inference_duration_seconds` | Histogram | `model` | Time spent waiting for LiteLLM inference |
+| `repo_agent_inference_tokens_total` | Counter | `model`, `kind` | Provider-reported or estimated prompt/completion tokens; failed attempts use `estimated_failed_prompt` |
+| `repo_agent_inference_cost_usd_total` | Counter | `model` | Model-aware estimated cost for successful inference calls |
+| `repo_agent_inference_usage_gaps_total` | Counter | `model`, `status` | Attempts without provider-reported usage |
 
 Activity retries produce a metric event for each attempt. An eventual workflow success may
 therefore coexist with earlier inference errors.
+Successful responses without usage are tokenized locally and marked as estimated in the
+API result and trace. For failed attempts, only an estimated prompt count is recorded;
+completion usage and billing are unknown and are not folded into the cost counter.
 
 ### MCP Metrics
 
@@ -96,6 +102,7 @@ Use the Prometheus `job` label to distinguish `repo-agent-api` and `repo-agent-w
 | Are runs being accepted? | Workflows-started counter | Counts accepted submissions, not successful completions |
 | Is inference healthy? | Inference attempts by `model` and `status` | Counts Activity attempts, so retries increase both traffic and errors |
 | Is inference slow? | Inference duration histogram by model alias | Measures worker wait time around the LiteLLM request |
+| How quickly are tokens and cost accumulating? | Token-rate and estimated-cost panels by model | Successful missing-usage responses are estimates; failures may be undercounted |
 | Is a process resource constrained? | CPU, memory, file descriptor, and GC metrics | Indicates process pressure but not Ollama GPU or model memory usage |
 
 The result endpoint's latency is intentionally different from ordinary API latency: it
@@ -115,6 +122,9 @@ The provisioned **repo_agent overview** dashboard contains:
 - API request rate by method, route, and status
 - API p95 latency by route
 - Inference outcomes by status
+- Token rate by model and usage kind
+- Estimated inference cost by model
+- Missing-usage attempts by model and status
 - Recent API, Temporal workflow, Activity, LLM, and MCP traces
 - MCP outcomes and p95 latency by operation and access mode
 - API and worker resident memory
@@ -260,8 +270,7 @@ add the following in priority order:
 
 1. Workflow completion, failure, cancellation, and durable end-to-end duration metrics.
 2. Temporal schedule-to-start latency and task-queue backlog for worker capacity planning.
-3. LiteLLM/provider token counts, rate-limit responses, estimated cost, and time to first
-  token where the provider exposes them.
+3. Provider rate-limit responses, exact failed-attempt billing, and time to first token.
 4. Ollama host CPU, accelerator, memory, queue depth, and model-load duration.
 5. PostgreSQL, Temporal Server, Prometheus, Tempo, and container-level health metrics.
 

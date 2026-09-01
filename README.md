@@ -101,12 +101,13 @@ and the current trace-coverage boundary.
 | Model fixed per run | Predictable privacy, cost, and replay behavior | No automatic provider failover |
 | Runtime MCP discovery | Tool schemas can evolve without Python Activity changes | Discovery latency and schemas are recorded per workflow |
 | Two write gates | Requires both operator and per-run intent | Ambiguous remote writes still require idempotency or reconciliation |
+| Per-run token and cost limits | Stops continued execution after a configured budget is crossed | One call and failed retries can have unreported overage |
 | Prometheus plus Tempo | Metrics and traces stay inspectable in the local stack | Local volumes are neither highly available nor long-term storage |
 
 The current design optimizes for understandable local operation and durable execution, not
 public multi-tenancy or high availability. The main production gaps are API authentication,
-worker/Activity tracing, mutation idempotency, provider-aware concurrency, and backed-up
-state stores.
+mutation idempotency, exact failed-attempt billing, provider-aware concurrency, and
+backed-up state stores.
 
 ## Prerequisites
 

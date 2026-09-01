@@ -22,7 +22,7 @@ from repo_agent.contracts import (
     TokenUsage,
     ToolCall,
 )
-from repo_agent.pricing import estimate_cost_usd
+from repo_agent.pricing import estimate_cost_usd, estimate_tokens
 from repo_agent.settings import get_settings
 
 INFERENCE_CALLS = Counter(
@@ -38,12 +38,17 @@ INFERENCE_LATENCY = Histogram(
 INFERENCE_TOKENS = Counter(
     "repo_agent_inference_tokens_total",
     "Prompt and completion tokens consumed by inference calls",
-    ["model", "kind"],  # kind: "prompt" or "completion"
+    ["model", "kind"],
 )
 INFERENCE_COST_USD = Counter(
     "repo_agent_inference_cost_usd_total",
     "Estimated USD cost of inference calls, by model alias",
     ["model"],
+)
+INFERENCE_USAGE_GAPS = Counter(
+    "repo_agent_inference_usage_gaps_total",
+    "Inference attempts without provider-reported usage",
+    ["model", "status"],
 )
 MCP_OPERATIONS = Counter(
     "repo_agent_mcp_operations_total",
@@ -259,25 +264,41 @@ async def run_inference(request: InferenceRequest) -> InferenceResult:
             if message.content is None and not tool_calls:
                 raise ValueError("Inference response did not contain text or tool calls")
 
-            usage = None
+            usage_is_estimated = response.usage is None
             if response.usage is not None:
                 prompt_tokens = response.usage.prompt_tokens
                 completion_tokens = response.usage.completion_tokens
-                cost = estimate_cost_usd(request.model, prompt_tokens, completion_tokens)
-                INFERENCE_TOKENS.labels(model=request.model, kind="prompt").inc(prompt_tokens)
-                INFERENCE_TOKENS.labels(model=request.model, kind="completion").inc(
-                    completion_tokens
+                total_tokens = response.usage.total_tokens
+            else:
+                prompt_tokens, completion_tokens = estimate_tokens(
+                    response.model,
+                    request.messages,
+                    message.content,
                 )
-                INFERENCE_COST_USD.labels(model=request.model).inc(cost)
-                span.set_attribute("gen_ai.usage.prompt_tokens", prompt_tokens)
-                span.set_attribute("gen_ai.usage.completion_tokens", completion_tokens)
-                span.set_attribute("gen_ai.usage.cost_usd", cost)
-                usage = TokenUsage(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=response.usage.total_tokens,
-                    estimated_cost_usd=cost,
-                )
+                total_tokens = prompt_tokens + completion_tokens
+                INFERENCE_USAGE_GAPS.labels(model=request.model, status="success").inc()
+            cost = estimate_cost_usd(
+                request.model,
+                response.model,
+                prompt_tokens,
+                completion_tokens,
+            )
+            INFERENCE_TOKENS.labels(model=request.model, kind="prompt").inc(prompt_tokens)
+            INFERENCE_TOKENS.labels(model=request.model, kind="completion").inc(
+                completion_tokens
+            )
+            INFERENCE_COST_USD.labels(model=request.model).inc(cost)
+            span.set_attribute("gen_ai.usage.prompt_tokens", prompt_tokens)
+            span.set_attribute("gen_ai.usage.completion_tokens", completion_tokens)
+            span.set_attribute("gen_ai.usage.cost_usd", cost)
+            span.set_attribute("gen_ai.usage.estimated", usage_is_estimated)
+            usage = TokenUsage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                estimated_cost_usd=cost,
+                is_estimated=usage_is_estimated,
+            )
 
         INFERENCE_CALLS.labels(model=request.model, status="success").inc()
         return InferenceResult(
@@ -287,5 +308,14 @@ async def run_inference(request: InferenceRequest) -> InferenceResult:
             usage=usage,
         )
     except Exception:
+        try:
+            prompt_tokens, _ = estimate_tokens(request.model, request.messages, None)
+        except Exception:
+            prompt_tokens = 0
+        INFERENCE_USAGE_GAPS.labels(model=request.model, status="error").inc()
+        if prompt_tokens:
+            INFERENCE_TOKENS.labels(model=request.model, kind="estimated_failed_prompt").inc(
+                prompt_tokens
+            )
         INFERENCE_CALLS.labels(model=request.model, status="error").inc()
         raise

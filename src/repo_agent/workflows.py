@@ -34,6 +34,18 @@ def openai_tool(tool: McpToolDefinition) -> dict[str, object]:
     }
 
 
+def enforce_budget(request: AgentRequest, total_tokens: int, total_cost: float) -> None:
+    if total_tokens > request.max_total_tokens:
+        raise RuntimeError(
+            f"Token budget exceeded: {total_tokens} > {request.max_total_tokens}"
+        )
+    if total_cost > request.max_estimated_cost_usd:
+        raise RuntimeError(
+            "Estimated cost budget exceeded: "
+            f"${total_cost:.6f} > ${request.max_estimated_cost_usd:.6f}"
+        )
+
+
 @workflow.defn
 class AgentWorkflow:
     @workflow.run
@@ -72,6 +84,7 @@ class AgentWorkflow:
 
         total_tokens = 0
         total_cost = 0.0
+        usage_is_estimated = False
         for _ in range(12):
             result = await workflow.execute_activity(
                 "run_inference",
@@ -87,6 +100,8 @@ class AgentWorkflow:
             if result.usage is not None:
                 total_tokens += result.usage.total_tokens
                 total_cost += result.usage.estimated_cost_usd
+                usage_is_estimated = usage_is_estimated or result.usage.is_estimated
+            enforce_budget(request, total_tokens, total_cost)
             if not result.tool_calls:
                 if result.content is None:
                     raise ValueError("Inference completed without a final response")
@@ -95,6 +110,7 @@ class AgentWorkflow:
                     model=result.model,
                     total_tokens=total_tokens,
                     estimated_cost_usd=total_cost,
+                    usage_is_estimated=usage_is_estimated,
                 )
 
             messages.append(

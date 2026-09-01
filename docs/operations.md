@@ -59,6 +59,8 @@ Application settings use the `REPO_AGENT_` prefix.
 | `REPO_AGENT_TEMPORAL_TASK_QUEUE` | `repo-agent` | `repo-agent` |
 | `REPO_AGENT_LLM_BASE_URL` | `http://localhost:4000/v1` | `http://litellm:4000/v1` |
 | `REPO_AGENT_LLM_API_KEY` | `local-development` | From `.env` |
+| `REPO_AGENT_MAX_TOTAL_TOKENS` | `100000` | From `.env` |
+| `REPO_AGENT_MAX_ESTIMATED_COST_USD` | `5.0` | From `.env` |
 | `REPO_AGENT_GITHUB_MCP_URL` | `https://api.githubcopilot.com/mcp/` | Same |
 | `REPO_AGENT_GITHUB_MCP_TOOLSETS` | `repos,issues,pull_requests,users` | From `.env` |
 | `REPO_AGENT_GITHUB_TOKEN` | unset | From `GITHUB_TOKEN` in `.env` |
@@ -74,6 +76,12 @@ The MCP HTTP/read timeout is distinct from Temporal's Activity start-to-close ti
 The workflow allows three minutes for discovery and five minutes for a tool call, while
 each individual MCP HTTP session uses the 120-second application default. Increasing only
 one layer may leave the other as the effective limit.
+
+`POST /runs` accepts positive `max_total_tokens` and `max_estimated_cost_usd` overrides.
+The workflow accumulates usage after every successful inference and fails before another
+tool step when either limit is exceeded. A provider call can itself cross a limit, and a
+failed or timed-out provider attempt may incur usage that the provider did not report, so
+these controls bound continued execution rather than acting as prepaid billing caps.
 
 ## Runtime Dependencies
 

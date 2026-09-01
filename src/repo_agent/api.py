@@ -45,6 +45,8 @@ class RunCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=100_000)
     allow_writes: bool = False
     model: str = Field(default="agent-default", min_length=1, max_length=200)
+    max_total_tokens: int | None = Field(default=None, gt=0)
+    max_estimated_cost_usd: float | None = Field(default=None, gt=0)
 
 
 class RunAccepted(BaseModel):
@@ -62,6 +64,7 @@ class RunOutput(BaseModel):
     model: str
     total_tokens: int
     estimated_cost_usd: float
+    usage_is_estimated: bool
 
 
 class ModelOption(BaseModel):
@@ -170,6 +173,10 @@ async def create_run(body: RunCreate, request: Request) -> RunAccepted:
             prompt=body.prompt,
             allow_writes=body.allow_writes,
             model=body.model,
+            max_total_tokens=body.max_total_tokens or settings.max_total_tokens,
+            max_estimated_cost_usd=(
+                body.max_estimated_cost_usd or settings.max_estimated_cost_usd
+            ),
         ),
         id=workflow_id,
         task_queue=settings.temporal_task_queue,
@@ -201,6 +208,7 @@ async def get_run_result(workflow_id: str, request: Request) -> RunOutput:
         model=result.model,
         total_tokens=result.total_tokens,
         estimated_cost_usd=result.estimated_cost_usd,
+        usage_is_estimated=result.usage_is_estimated,
     )
 
 

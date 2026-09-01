@@ -21,18 +21,26 @@ BASE_URL = os.environ.get("REPO_AGENT_EVAL_BASE_URL", "http://localhost:8000")
 # /runs/{id}/result blocks server-side until the workflow finishes, so the
 # client timeout just needs to be longer than the slowest expected run
 # (the workflow itself caps inference at 10 min/iteration, 12 iterations max).
-RESULT_TIMEOUT_SECONDS = 180
+RESULT_TIMEOUT_SECONDS = float(os.environ.get("REPO_AGENT_EVAL_TIMEOUT_SECONDS", "600"))
 
 
 def call_api(prompt: str, options: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     config = options.get("config", {})
     model = config.get("model", "agent-default")
     allow_writes = bool(config.get("allow_writes", False))
+    max_total_tokens = int(config.get("max_total_tokens", 25_000))
+    max_estimated_cost_usd = float(config.get("max_estimated_cost_usd", 1.0))
 
     with httpx.Client(base_url=BASE_URL, timeout=30) as client:
         create_response = client.post(
             "/runs",
-            json={"prompt": prompt, "model": model, "allow_writes": allow_writes},
+            json={
+                "prompt": prompt,
+                "model": model,
+                "allow_writes": allow_writes,
+                "max_total_tokens": max_total_tokens,
+                "max_estimated_cost_usd": max_estimated_cost_usd,
+            },
         )
         create_response.raise_for_status()
         workflow_id = create_response.json()["workflow_id"]
@@ -53,5 +61,9 @@ def call_api(prompt: str, options: dict[str, Any], context: dict[str, Any]) -> d
             "workflow_id": workflow_id,
             "model": body.get("model"),
             "estimated_cost_usd": body.get("estimated_cost_usd"),
+            "usage_is_estimated": body.get("usage_is_estimated"),
+            "allow_writes": allow_writes,
+            "max_total_tokens": max_total_tokens,
+            "max_estimated_cost_usd": max_estimated_cost_usd,
         },
     }

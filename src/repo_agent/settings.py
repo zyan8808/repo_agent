@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +17,8 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:4000/v1"
     llm_api_key: str = "local-development"
     llm_model: str = "agent-default"
+    max_total_tokens: int = Field(default=100_000, gt=0)
+    max_estimated_cost_usd: float = Field(default=5.0, gt=0)
     github_mcp_url: str = "https://api.githubcopilot.com/mcp/"
     github_mcp_toolsets: str = "repos,issues,pull_requests,users"
     github_token: str | None = None

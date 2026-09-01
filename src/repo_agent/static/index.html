@@ -185,6 +185,8 @@
     .status.complete .dot { background: var(--green); }
     .status.error .dot { background: var(--red); }
     .model { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .result-meta { display: flex; align-items: center; gap: 12px; }
+    .usage { color: var(--muted); font-size: 12px; }
     .output {
       margin: 0;
       padding: 20px;
@@ -206,13 +208,17 @@
 
     @media (max-width: 760px) {
       .shell { width: min(100% - 22px, 620px); padding-top: 14px; }
-      header { align-items: flex-start; }
+      header { align-items: flex-start; flex-wrap: wrap; }
       nav { display: grid; grid-template-columns: repeat(2, auto); }
       main { grid-template-columns: 1fr; padding-top: 26px; }
       .history { order: 2; }
-      .composer-footer { align-items: flex-end; }
-      .run-options { align-items: flex-start; flex-direction: column; gap: 10px; }
-      select { max-width: 180px; }
+      .composer-footer { align-items: stretch; flex-direction: column; }
+      .run-options { align-items: stretch; flex-direction: column; gap: 10px; min-width: 0; }
+      .model-picker { justify-content: space-between; }
+      select { width: min(220px, 65%); }
+      .run-button { width: 100%; }
+      .result-head { align-items: flex-start; flex-direction: column; }
+      .result-meta { flex-wrap: wrap; }
     }
   </style>
 </head>
@@ -259,7 +265,10 @@
         <section class="result" id="result" aria-live="polite">
           <div class="result-head">
             <div class="status" id="status"><span class="dot"></span><span id="status-text">Starting</span></div>
-            <span class="model" id="model"></span>
+            <div class="result-meta">
+              <span class="usage" id="usage"></span>
+              <span class="model" id="model"></span>
+            </div>
           </div>
           <pre class="output" id="output">Creating a durable workflow...</pre>
         </section>
@@ -282,6 +291,7 @@
     const statusView = document.querySelector("#status");
     const statusText = document.querySelector("#status-text");
     const modelView = document.querySelector("#model");
+    const usageView = document.querySelector("#usage");
     const outputView = document.querySelector("#output");
     const historyView = document.querySelector("#history");
     const storageKey = "repo-agent-runs";
@@ -337,6 +347,12 @@
       resultPanel.classList.add("visible");
       setStatus(run.error ? "Failed" : "Completed", run.error ? "error" : "complete");
       modelView.textContent = run.model || "";
+      if (Number.isFinite(run.totalTokens) && Number.isFinite(run.estimatedCostUsd)) {
+        const provenance = run.usageIsEstimated ? "estimated" : "provider";
+        usageView.textContent = `${run.totalTokens.toLocaleString()} tokens · $${run.estimatedCostUsd.toFixed(6)} · ${provenance}`;
+      } else {
+        usageView.textContent = "";
+      }
       outputView.textContent = run.error || run.output;
     };
 
@@ -399,7 +415,11 @@
         const accepted = await requestJson("/runs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, allow_writes: allowWrites, model }),
+          body: JSON.stringify({
+            prompt,
+            allow_writes: allowWrites,
+            model,
+          }),
         });
         outputView.textContent = `Workflow ${accepted.workflow_id} is running...`;
         const completed = await pollRun(accepted.workflow_id);
@@ -408,6 +428,9 @@
           prompt,
           output: completed.output,
           model: completed.model,
+          totalTokens: completed.total_tokens,
+          estimatedCostUsd: completed.estimated_cost_usd,
+          usageIsEstimated: completed.usage_is_estimated,
           createdAt: Date.now(),
         };
         showResult(run);
