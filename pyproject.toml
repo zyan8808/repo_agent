@@ -29,7 +29,7 @@ repo-agent-worker = "repo_agent.worker:run"
 [dependency-groups]
 dev = [
     "pyright>=1.1.403,<2",
-    "pytest>=8.4,<9",
+    "pytest>=8.4,<10",
     "pytest-asyncio>=1.1,<2",
     "ruff>=0.12,<1",
     "types-pyyaml>=6,<7",
