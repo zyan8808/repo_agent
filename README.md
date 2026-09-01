@@ -201,6 +201,7 @@ The result request waits for a running workflow to finish. A failed workflow ret
 | API documentation | Interactive OpenAPI documentation | http://localhost:8000/docs |
 | Temporal UI | Workflow history and Activity attempts | http://localhost:8080 |
 | LiteLLM | OpenAI-compatible local model gateway | http://localhost:4000 |
+| Promptfoo | Eval results, when `promptfoo view --port 15500` is running | http://localhost:15500 |
 | Grafana | Provisioned project dashboard and trace exploration | http://localhost:3000/d/repo-agent-overview/repo-agent-overview |
 | Prometheus | Metrics queries and target health | http://localhost:9090 |
 
@@ -220,6 +221,19 @@ uv run pytest
 uv run ruff check src tests
 uv run pyright
 ```
+
+Run the live agent eval across both configured Ollama models and the Anthropic and OpenAI
+routes after populating their API keys in `.env`:
+
+```bash
+cd evals
+PATH="$PWD/../.venv/bin:$PATH" npx promptfoo@0.122.0 eval \
+	-c promptfooconfig.yaml --no-cache --max-concurrency 4
+npx promptfoo@0.122.0 view --port 15500
+```
+
+Each of the 20 model/task runs has a 50,000-token and $1 estimated-cost ceiling. See the
+[eval guide](evals/README.md) for prerequisites and Markdown report generation.
 
 The main code is organized as follows:
 

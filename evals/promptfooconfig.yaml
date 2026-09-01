@@ -5,8 +5,8 @@
 #
 # Run:
 #   cd evals
-#   npx promptfoo eval
-#   npx promptfoo view
+#   PATH="$PWD/../.venv/bin:$PATH" npx promptfoo@0.122.0 eval --max-concurrency 4
+#   npx promptfoo@0.122.0 view --port 15500
 #
 # CI: wire this into .github/workflows/ci.yml as a job that runs after
 # `docker compose up -d --wait` and fails the build on any red assertion.
@@ -18,22 +18,36 @@ providers:
     label: repo-agent-default
     config:
       model: agent-default
-      max_total_tokens: 25000
+      max_total_tokens: 50000
       max_estimated_cost_usd: 1.0
-      timeout: 600000
+      timeout: 3600000
+  - id: file://provider.py
+    label: repo-agent-qwen3-8b
+    config:
+      model: agent-qwen3-8b
+      max_total_tokens: 50000
+      max_estimated_cost_usd: 1.0
+      timeout: 3600000
   - id: file://provider.py
     label: repo-agent-anthropic
     config:
       model: agent-anthropic
-      max_total_tokens: 25000
+      max_total_tokens: 50000
       max_estimated_cost_usd: 1.0
-      timeout: 600000
+      timeout: 3600000
+  - id: file://provider.py
+    label: repo-agent-openai
+    config:
+      model: agent-openai
+      max_total_tokens: 50000
+      max_estimated_cost_usd: 1.0
+      timeout: 3600000
 
 defaultTest:
   options:
-    # Each task gets one MCP round-trip's worth of budget; slow local
-    # models shouldn't fail the eval on latency alone.
-    timeout: 600000
+    # Model-graded assertions use the same local stack and may queue behind
+    # target calls, so allow an hour for each complete case.
+    timeout: 3600000
     provider:
       id: openai:chat:agent-default
       config:
