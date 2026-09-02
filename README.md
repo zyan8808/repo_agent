@@ -212,9 +212,9 @@ The result request waits for a running workflow to finish. A failed workflow ret
 - [Metrics and observability](docs/metrics.md): telemetry pipeline, metric reference, PromQL examples, dashboards, and traces
 - [Evaluation guide](evals/EVALUATION.md): scoring, model matrix, execution, and results
 
-## Development
+## Evaluation
 
-Install dependencies and run the project checks:
+Install dependencies and run the project checks before evaluating:
 
 ```bash
 uv sync
@@ -237,12 +237,21 @@ Each of the 20 model/task runs has a 100,000-token and $1 estimated-cost ceiling
 allow two hours; hosted cases allow 30 minutes. See the [eval guide](evals/EVALUATION.md) for
 credentials, timeout rationale, and Markdown report generation.
 
-The latest completed baseline is
-[eval-MRG-2026-09-01T23:21:54](evals/eval-MRG-2026-09-01T23-21-54.md): 16 passes, 2
-assertion failures, and 2 timeout errors across 20 cases. This imported Promptfoo record
-combines the completed default, Qwen, and OpenAI cases from `eval-Lut` with the repaired
-Anthropic cases from `eval-gtx`. Anthropic passed 5/5 after the gateway began supplying the
-workspace ID required by the multi-workspace key.
+The latest merged evaluation is
+[eval-MRG-2026-09-01T23:21:54](evals/eval-MRG-2026-09-01T23-21-54.md). It combines the
+completed default, Qwen, and OpenAI cases from `eval-Lut` with the repaired Anthropic cases
+from `eval-gtx`.
+
+| Provider | Model alias | Passed | Pass rate | Agent tokens | Estimated agent cost | Average latency |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| repo-agent-default | `agent-default` | 3/5 | 60% | 74,064 | $0.0000 | 6.8m |
+| repo-agent-qwen3-8b | `agent-qwen3-8b` | 4/5 | 80% | 140,437 | $0.0000 | 8.5m |
+| repo-agent-anthropic | `agent-anthropic` | 5/5 | 100% | 203,939 | $0.6650 | 34.0s |
+| repo-agent-openai | `agent-openai` | 4/5 | 80% | 81,423 | $0.2376 | 21.9s |
+
+Overall, 16 of 20 cases passed, with 2 assertion failures and 2 timeout errors. See the
+[evaluation guide](evals/EVALUATION.md) for scoring methodology, source eval details,
+budgets, reproduction steps, and historical results.
 
 The 100,000-token change was verified by a focused rerun of the OpenAI owner task:
 [eval-CVq-2026-09-01T20:03:39](evals/eval-CVq-2026-09-01T20-03-39.md) passed in 14.3 seconds
@@ -250,6 +259,8 @@ using 11,740 tokens. The updated Anthropic credential is not expired, but Anthro
 requests without a workspace selector. Set `ANTHROPIC_WORKSPACE_ID` for multi-workspace
 personal or service-account keys; the LiteLLM startup wrapper adds the required provider
 header.
+
+## Project Layout
 
 The main code is organized as follows:
 
