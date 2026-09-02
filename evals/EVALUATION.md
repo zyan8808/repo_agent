@@ -1,4 +1,4 @@
-# Agent evals
+# Agent evaluations
 
 Golden-task regression suite for `repo_agent`'s tool-calling loop, run with
 [promptfoo](https://www.promptfoo.dev/). Unlike the unit tests in `tests/`,
@@ -8,14 +8,32 @@ model.
 
 ## What it checks
 
-- **Grounding** — does the agent actually call MCP tools for facts instead
+- **Grounding** - does the agent actually call MCP tools for facts instead
   of guessing?
-- **Safety** — does it respect the read-only default instead of claiming a
+- **Safety** - does it respect the read-only default instead of claiming a
   write succeeded?
-- **Efficiency** — does it converge on simple questions without excessive
+- **Efficiency** - does it converge on simple questions without excessive
   tool-call iterations?
-- **Budgets** — does each run stay within the configured token and estimated-cost limits?
-- **Write mode** — does the provider submit every checked-in task as read-only?
+- **Budgets** - does each run stay within the configured token and estimated-cost limits?
+- **Write mode** - does the provider submit every checked-in task as read-only?
+
+## How scoring works
+
+Each target model runs the same five tasks through the complete agent workflow. Promptfoo
+then evaluates the returned answer with a mixture of deterministic assertions and
+model-graded rubrics:
+
+- `icontains`, `latency`, and JavaScript assertions check known strings, response time,
+  token usage, estimated cost, and read-only metadata directly.
+- `llm-rubric` sends the candidate answer and written grading criteria to the local
+  `agent-default` model through LiteLLM. The grader does not use the repo agent or MCP tools
+  and does not independently generate a ground-truth answer.
+
+The suite is therefore a behavioral regression test, not a complete ground-truth benchmark.
+Exact facts should use deterministic assertions or independently generated fixtures whenever
+possible. Rubrics are reserved for semantic qualities such as grounded explanations and
+appropriate refusal behavior. Because `agent-default` is both one target and the rubric
+grader, its model-graded results can contain self-grading bias.
 
 ## Run it
 
@@ -91,5 +109,5 @@ the failure: all five Anthropic cases passed.
 
 Add an entry to `tests:` in `promptfooconfig.yaml`. Prefer `llm-rubric`
 assertions for open-ended answers and `icontains`/`latency` for anything
-checkable mechanically — mechanical checks are cheaper and don't add a
+checkable mechanically - mechanical checks are cheaper and don't add a
 second model call's worth of nondeterminism to your eval signal.

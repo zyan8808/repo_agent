@@ -6,6 +6,10 @@ effects, LiteLLM selects an inference provider, and GitHub MCP supplies typed re
 capabilities. Prometheus, OpenTelemetry, Tempo, and Grafana provide local operational
 visibility.
 
+The application uses Python's standard `src` layout: `src/` is the import boundary and
+`src/repo_agent/` is the installable package. This separation ensures tests exercise the
+packaged application instead of importing loose modules from the repository root.
+
 ## System Flow
 
 ```mermaid

@@ -210,6 +210,7 @@ The result request waits for a running workflow to finish. A failed workflow ret
 - [Architecture](docs/architecture.md): components, execution flow, durability, and extension points
 - [Operations and configuration](docs/operations.md): environment variables, lifecycle commands, APIs, and troubleshooting
 - [Metrics and observability](docs/metrics.md): telemetry pipeline, metric reference, PromQL examples, dashboards, and traces
+- [Evaluation guide](evals/EVALUATION.md): scoring, model matrix, execution, and results
 
 ## Development
 
@@ -233,7 +234,7 @@ npx promptfoo@0.122.0 view --port 15500
 ```
 
 Each of the 20 model/task runs has a 100,000-token and $1 estimated-cost ceiling. Local cases
-allow two hours; hosted cases allow 30 minutes. See the [eval guide](evals/README.md) for
+allow two hours; hosted cases allow 30 minutes. See the [eval guide](evals/EVALUATION.md) for
 credentials, timeout rationale, and Markdown report generation.
 
 The latest completed baseline is
@@ -264,6 +265,12 @@ configs/          LiteLLM, Prometheus, Tempo, Grafana, and collector config
 docs/             architecture, operations, and observability guides
 tests/            automated tests
 ```
+
+This uses Python's standard `src` layout. The outer `src/` directory is an import boundary,
+not a package; `src/repo_agent/` is the installable `repo_agent` package used by entry points
+and imports. Keeping the package below `src/` prevents tests and local commands from
+accidentally importing an uninstalled working-tree copy. Flattening these files directly
+into `src/` would create top-level modules rather than one coherent package.
 
 ## Design Rules
 
